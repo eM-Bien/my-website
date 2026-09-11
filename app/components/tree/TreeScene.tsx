@@ -32,7 +32,7 @@ type Key = {
 };
 
 const KEYS: Key[] = [
-  { at: 0.0,  angle: 0,              radius: 1.45, height: 0.50, look: 0.42, shiftX: 0 },
+  { at: 0.0,  angle: 0,              radius: 2.6,  height: 0.60, look: 0.42, shiftX: 0 },
   { at: 0.30, angle: Math.PI,        radius: 1.55, height: 0.56, look: 0.44, shiftX: 0 },
   { at: 0.60, angle: Math.PI * 2,    radius: 1.40, height: 0.50, look: 0.42, shiftX: 0 },
   // dojazd i przekadrowanie: korona ucieka w prawo, lewa strona zostaje pusta
