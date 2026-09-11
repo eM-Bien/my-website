@@ -41,7 +41,7 @@ const KEYS: Key[] = [
 
 // Korona: kwiaty sadzone w kodzie na wierzchołkach gałęzi modelu.
 const BLOSSOMS   = 42000;   // ile kart (2 trójkąty każda, jeden draw call)
-const PETAL_SIZE = 0.022;   // bok karty × wysokość drzewa
+const PETAL_SIZE = 0.028;   // bok karty × wysokość drzewa
 const BLOSSOM_FROM = 0.34;  // od jakiej wysokości drzewa zaczyna się korona
 // Kora: mnożnik na teksturze (1 = jak w modelu). Domyślna jest jasnoszara
 // i przy różowej koronie wygląda wypłowiale.
@@ -64,6 +64,7 @@ const FLOAT_DRIFT = 0.012;  // zasięg dryfu × wysokość drzewa
 // Gwiazdy: kopuła daleko za drzewem, poniżej horyzontu chowa je woda.
 const STARS = 900;
 const STAR_SIZE = 1.5;      // mnożnik wielkości
+const STAR_TWINKLE = 2.6;   // tempo migotania
 const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
 const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
 // Szczyt fizycznie ten sam co przy promieniu 0.30 (0.38 × 0.30 = 0.26 × 0.44);
@@ -739,15 +740,21 @@ export default function TreeScene() {
           sg.setAttribute('aSize', new THREE.Float32BufferAttribute(ss, 1));
           sg.setAttribute('aPhase', new THREE.Float32BufferAttribute(sph, 1));
           const sm = new THREE.ShaderMaterial({
-            uniforms: { uTex: { value: starTex }, uTime },
+            uniforms: { uTex: { value: starTex }, uTime, uTw: { value: STAR_TWINKLE } },
             vertexShader: `
               attribute float aSize;
               attribute float aPhase;
               uniform float uTime;
+              uniform float uTw;
               varying float vTw;
               void main() {
                 vec4 mv = modelViewMatrix * vec4(position, 1.0);
-                vTw = 0.55 + 0.45 * sin(uTime * (0.6 + fract(aPhase) * 0.9) + aPhase * 7.0);
+                // dwie częstotliwości: wolne falowanie plus szybki błysk,
+                // żeby nie pulsowały jak na jednym metronomie
+                float t = uTime * uTw;
+                vTw = 0.45
+                    + 0.35 * sin(t * (0.6 + fract(aPhase) * 0.9) + aPhase * 7.0)
+                    + 0.20 * sin(t * (1.7 + fract(aPhase * 3.1) * 1.4) + aPhase * 3.0);
                 gl_PointSize = aSize * 300.0 / -mv.z;
                 gl_Position = projectionMatrix * mv;
               }`,
