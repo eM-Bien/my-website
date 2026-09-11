@@ -59,6 +59,11 @@ const SHADE_GAIN = 1.15;
 // Podłoże: miękka poświata pod koroną i opadłe płatki. Bez tego drzewo
 // wisi w próżni — pień kończy się w połowie kadru i nie ma się o co oprzeć.
 const GROUND_PETALS = 1200;
+const FLOAT_PETALS = 700;   // płatki dryfujące po wodzie
+const FLOAT_DRIFT = 0.012;  // zasięg dryfu × wysokość drzewa
+// Gwiazdy: kopuła daleko za drzewem, poniżej horyzontu chowa je woda.
+const STARS = 900;
+const STAR_SIZE = 1.5;      // mnożnik wielkości
 const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
 const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
 // Szczyt fizycznie ten sam co przy promieniu 0.30 (0.38 × 0.30 = 0.26 × 0.44);
@@ -118,6 +123,42 @@ function glowTexture() {
 }
 
 
+/** Czteroramienna gwiazdka: jasny rdzeń i dwa cienkie, długie promienie. */
+function starTexture() {
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d')!;
+  ctx.globalCompositeOperation = 'lighter';
+  const core = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S * 0.18);
+  core.addColorStop(0.0, 'rgba(255,255,255,1)');
+  core.addColorStop(0.35, 'rgba(200,215,255,0.8)');
+  core.addColorStop(1.0, 'rgba(120,150,255,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, S, S);
+  // promienie: wąskie w środku, gasnące ku końcom
+  for (const rot of [0, Math.PI / 2]) {
+    ctx.save();
+    ctx.translate(S / 2, S / 2);
+    ctx.rotate(rot);
+    const g = ctx.createLinearGradient(-S / 2, 0, S / 2, 0);
+    g.addColorStop(0.0, 'rgba(160,190,255,0)');
+    g.addColorStop(0.5, 'rgba(240,245,255,0.95)');
+    g.addColorStop(1.0, 'rgba(160,190,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(-S / 2, 0);
+    ctx.quadraticCurveTo(0, -S * 0.045, S / 2, 0);
+    ctx.quadraticCurveTo(0, S * 0.045, -S / 2, 0);
+    ctx.fill();
+    ctx.restore();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+
 export default function TreeScene() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -159,11 +200,13 @@ export default function TreeScene() {
     let fitSize = 10;   // większy z wymiarów: szerokość vs wysokość
     let points: THREE.Points | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
+    let water: Reflector | null = null;
     let disposed = false;
     let raf = 0;
     let smooth = 0;
 
     const tex = glowTexture();
+    const starTex = starTexture();
     // Jeden uniform czasu dla kwiatów i świateł — inaczej rozjeżdżają się
     // fazy i światełka zostają w miejscu, z którego płatek już odjechał.
     const uTime = { value: 0 };
@@ -449,7 +492,7 @@ export default function TreeScene() {
             // powstaje po drzewie — musi mieć co odbijać.
             const waterY = mound.position.y + mH * WATER_LEVEL;
             const waterR = fitSize * 14;   // horyzont daleko, żeby nie rysował kreski
-            const water = new Reflector(new THREE.PlaneGeometry(waterR, waterR), {
+            water = new Reflector(new THREE.PlaneGeometry(waterR, waterR), {
               textureWidth: WATER_RES,
               textureHeight: WATER_RES,
               color: 0xd8cff0,   // odbicie jasne – warstwa tafli i tak je tłumi
@@ -546,6 +589,62 @@ export default function TreeScene() {
             fallen.instanceMatrix.needsUpdate = true;
             if (fallen.instanceColor) fallen.instanceColor.needsUpdate = true;
             root.add(fallen);
+
+            // ── płatki na wodzie ────────────────────────────────────────
+            // Osobny materiał, bo wiatr z korony gaśnie przy ziemi
+            // (smoothstep po wysokości) — te mają własny, powolny dryf
+            // po tafli. Przesunięcie dokładane PO instanceMatrix, w
+            // przestrzeni świata: karty leżą płasko, więc ich lokalne osie
+            // nie pokrywają się ze światem.
+            const floatMat = new THREE.MeshStandardMaterial({
+              map: petalMap,
+              roughness: 0.6,
+              metalness: 0,
+              side: THREE.DoubleSide,
+              alphaTest: 0.5,
+              transparent: false,
+              emissive: new THREE.Color(0xff6fae),
+              emissiveIntensity: 0.08,
+            });
+            floatMat.onBeforeCompile = (shader) => {
+              shader.uniforms.uTime = uTime;
+              shader.uniforms.uDrift = { value: treeHeight * FLOAT_DRIFT };
+              shader.vertexShader =
+                'uniform float uTime;\nuniform float uDrift;\n' +
+                shader.vertexShader.replace('#include <project_vertex>', `
+                  vec4 mvPosition = vec4(transformed, 1.0);
+                  #ifdef USE_INSTANCING
+                    mvPosition = instanceMatrix * mvPosition;
+                    vec3 iPos = instanceMatrix[3].xyz;
+                    float ph = iPos.x * 0.5 + iPos.z * 0.7;
+                    mvPosition.xyz += vec3(
+                      sin(uTime * 0.35 + ph),
+                      0.12 * sin(uTime * 1.3 + ph * 2.0),
+                      cos(uTime * 0.28 + ph * 1.3)) * uDrift;
+                  #endif
+                  mvPosition = modelViewMatrix * mvPosition;
+                  gl_Position = projectionMatrix * mvPosition;`);
+            };
+            const floating = new THREE.InstancedMesh(geo, floatMat, FLOAT_PETALS);
+            const shore = mR * 0.95;
+            for (let i = 0; i < FLOAT_PETALS; i++) {
+              const a = Math.random() * Math.PI * 2;
+              // od brzegu wyspy w głąb wody, gęściej blisko brzegu
+              const d = shore + Math.pow(Math.random(), 1.6) * fitSize * 1.3;
+              dummy.position.set(Math.cos(a) * d, waterY + 0.015, Math.sin(a) * d);
+              dummy.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.12,
+                                 Math.random() * Math.PI * 2, 0);
+              const sc = size * (0.6 + Math.random() * 0.6);
+              dummy.scale.set(sc, sc, sc);
+              dummy.updateMatrix();
+              floating.setMatrixAt(i, dummy.matrix);
+              tint.setHSL(0.91 + Math.random() * 0.05, 0.45, 0.38 + Math.random() * 0.18);
+              floating.setColorAt(i, tint);
+            }
+            floating.instanceMatrix.needsUpdate = true;
+            if (floating.instanceColor) floating.instanceColor.needsUpdate = true;
+            floating.frustumCulled = false;
+            root.add(floating);
           }
         }
 
@@ -612,6 +711,74 @@ export default function TreeScene() {
         points = new THREE.Points(geo, mat);
         points.renderOrder = 2;
         root.add(points);
+
+        // ── gwiazdy ────────────────────────────────────────────────────
+        // Górna półkula daleko za sceną. Poniżej horyzontu zasłania je
+        // tafla (przy horyzoncie kryje w całości), więc nie trzeba ich
+        // wycinać osobno. Migotanie i rozmiar per gwiazda w shaderze.
+        {
+          const R = fitSize * 11;
+          const sp: number[] = [];
+          const ss: number[] = [];
+          const sph: number[] = [];
+          for (let i = 0; i < STARS; i++) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = u * Math.PI * 2;
+            // cos(phi) równomiernie -> równomiernie po sferze; tylko góra
+            const y = 0.06 + v * 0.94;
+            const r = Math.sqrt(1 - y * y);
+            sp.push(Math.cos(theta) * r * R, y * R, Math.sin(theta) * r * R);
+            // większość drobna, kilka wyraźnych
+            const big = Math.random() < 0.08;
+            ss.push((big ? 2.2 + Math.random() * 2.0 : 0.5 + Math.random() * 1.1) * (R / 26) * STAR_SIZE);
+            sph.push(Math.random() * Math.PI * 2);
+          }
+          const sg = new THREE.BufferGeometry();
+          sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+          sg.setAttribute('aSize', new THREE.Float32BufferAttribute(ss, 1));
+          sg.setAttribute('aPhase', new THREE.Float32BufferAttribute(sph, 1));
+          const sm = new THREE.ShaderMaterial({
+            uniforms: { uTex: { value: starTex }, uTime },
+            vertexShader: `
+              attribute float aSize;
+              attribute float aPhase;
+              uniform float uTime;
+              varying float vTw;
+              void main() {
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                vTw = 0.55 + 0.45 * sin(uTime * (0.6 + fract(aPhase) * 0.9) + aPhase * 7.0);
+                gl_PointSize = aSize * 300.0 / -mv.z;
+                gl_Position = projectionMatrix * mv;
+              }`,
+            fragmentShader: `
+              uniform sampler2D uTex;
+              varying float vTw;
+              void main() {
+                vec4 t = texture2D(uTex, gl_PointCoord);
+                gl_FragColor = vec4(t.rgb, t.a * vTw);
+              }`,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          });
+          const stars = new THREE.Points(sg, sm);
+          stars.renderOrder = -2;
+          stars.frustumCulled = false;
+          root.add(stars);
+
+          // Gwiazdy nie wchodzą do odbicia: lustrzana kamera patrzy spod
+          // tafli w górę i łapie te przy horyzoncie, których z góry nie
+          // widać — woda była gęściej usiana gwiazdami niż niebo.
+          if (water) {
+            const pass = water.onBeforeRender;
+            water.onBeforeRender = (...args) => {
+              stars.visible = false;
+              pass.apply(water, args);
+              stars.visible = true;
+            };
+          }
+        }
 
       })
       .catch((e) => console.error('[tree] nie udało się wczytać modelu', e));
@@ -692,6 +859,7 @@ export default function TreeScene() {
       window.removeEventListener('resize', onResize);
       renderer.dispose();
       tex.dispose();
+      starTex.dispose();
       scene.traverse((o: THREE.Object3D) => {
         const m = o as THREE.Mesh;
         if (m.geometry) m.geometry.dispose();
