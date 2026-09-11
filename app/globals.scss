@@ -1,0 +1,34 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --night: #050414;
+  --bg-dark: #0A084A;
+  --bg-blue-dark: #06388B;
+  --blue: #1D66BD;
+  --blue-light: #4A8DE2;
+
+  --purple-dark: #3E0C66;
+  --purple: #642690;
+  --pink-purple: #9A5FB7;
+
+  --moon: #A4C9F6;
+  --text: #EAF4FF;
+}
+
+body {
+  font-family: "Inter", sans-serif;
+  background:
+  radial-gradient(circle at 50% 15%, #1D66BD 0%, transparent 35%),
+  linear-gradient(
+    180deg,
+    #0A084A 0%,
+    #06388B 45%,
+    #3E0C66 75%,
+    #0A084A 100%
+  );
+  color: var(--text);
+}
