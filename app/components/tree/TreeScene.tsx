@@ -60,8 +60,10 @@ const SHADE_GAIN = 1.15;
 // wisi w próżni — pień kończy się w połowie kadru i nie ma się o co oprzeć.
 const GROUND_PETALS = 1200;
 const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
-const MOUND_R = 0.30;       // promień pagórka × rozmiar drzewa
-const MOUND_TOP = 0.38;     // jaka część promienia jest płaskim szczytem
+const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
+// Szczyt fizycznie ten sam co przy promieniu 0.30 (0.38 × 0.30 = 0.26 × 0.44);
+// zmienia się tylko długość zbocza — łagodnie wchodzi w wodę.
+const MOUND_TOP = 0.26;     // jaka część promienia jest płaskim szczytem
 const MOUND_STRETCH = 1.0;  // rozciągnięcie wyspy wzdłuż X, 1 = koło
 // Woda: poziom liczony od szczytu pagórka, więc zmiana MOUND_H nie zatapia
 // wyspy. Rozdzielczość odbicia to osobny render sceny co klatkę — 512 px
@@ -156,6 +158,7 @@ export default function TreeScene() {
     let treeHeight = 10;
     let fitSize = 10;   // większy z wymiarów: szerokość vs wysokość
     let points: THREE.Points | null = null;
+    let waterMat: THREE.ShaderMaterial | null = null;
     let disposed = false;
     let raf = 0;
     let smooth = 0;
@@ -411,7 +414,7 @@ export default function TreeScene() {
             const mp = mGeo.attributes.position;
             const mc = new Float32Array(mp.count * 3);
             const cTop = new THREE.Color(0x8d4a84);   // grzbiet, blisko pnia
-            const cLow = new THREE.Color(0x120a18);   // zbocze, prawie czerń
+            const cLow = new THREE.Color(0x24162c);   // zbocze
             const tmp = new THREE.Color();
             for (let i = 0; i < mp.count; i++) {
               const x = mp.getX(i), z = mp.getZ(i);
@@ -422,7 +425,9 @@ export default function TreeScene() {
               // Pagórek oglądamy pod ostrym kątem, więc ostatnie procenty
               // promienia to na ekranie kilka pikseli i krótka rampa czyta
               // się jako narysowana elipsa.
-              const f = Math.min(Math.max((0.72 - t) / 0.72, 0), 1);
+              // Odkąd jest woda, rant i tak jest pod powierzchnią — wygaszanie
+              // może być łagodne, inaczej całe zbocze robi się czarną bryłą.
+              const f = Math.min(Math.max((1.0 - t) / 0.5, 0), 1);
               tmp.multiplyScalar(f * f * (3 - 2 * f));
               mc[i * 3] = tmp.r; mc[i * 3 + 1] = tmp.g; mc[i * 3 + 2] = tmp.b;
             }
@@ -468,6 +473,7 @@ export default function TreeScene() {
                   uHaze: { value: new THREE.Color(0x3a2658) },
                   uBg: { value: new THREE.Color(0x05030a) },
                   uFar: { value: waterR * 0.5 },
+                  uFwd: { value: new THREE.Vector2(0, -1) },
                 },
                 vertexShader: `
                   varying vec2 vW;
@@ -480,27 +486,26 @@ export default function TreeScene() {
                   uniform float uTime;
                   uniform vec3 uCol, uDeep, uHaze, uBg;
                   uniform float uFar;
+                  uniform vec2 uFwd;
                   varying vec2 vW;
                   void main() {
                     float d = length(vW);
+                    // Pasy w układzie kamery: py rośnie w głąb kadru, px
+                    // w bok. Pasy przybite do osi świata przy obrocie raz
+                    // leżały w poprzek, raz wzdłuż ekranu.
+                    float py = dot(vW, uFwd);
+                    float px = dot(vW, vec2(-uFwd.y, uFwd.x));
                     float far = smoothstep(0.0, uFar * 0.7, d);
                     vec3 tone = mix(uDeep, uHaze, far);
                     // poświata drzewa na wodzie
                     float pool = exp(-d * 0.28);
-                    // Zmarszczki przybite do wody i bez wyróżnionego
-                    // kierunku: sześć fal co 60°, w dwóch skalach. Pasy
-                    // wzdłuż jednej osi przy obrocie kamery raz leżały
-                    // w poprzek, raz wzdłuż ekranu; liczone w układzie
-                    // kamery – kręciły się razem z nią. Wzór izotropowy
-                    // wygląda tak samo z każdej strony i zostaje na miejscu.
-                    float t = uTime;
-                    float b = sin(dot(vW, vec2(1.0, 0.0)) * 2.9 + t * 0.6)
-                            + sin(dot(vW, vec2(0.5, 0.866)) * 2.9 - t * 0.5)
-                            + sin(dot(vW, vec2(-0.5, 0.866)) * 2.9 + t * 0.55)
-                            + 0.5 * sin(dot(vW, vec2(0.866, 0.5)) * 6.5 + t * 0.9)
-                            + 0.5 * sin(dot(vW, vec2(-0.866, 0.5)) * 6.5 - t * 0.8)
-                            + 0.5 * sin(vW.y * 6.5 + t * 0.7);
-                    float streak = pow(max(b * 0.11 + 0.5, 0.0), 3.0);
+                    // Wersja izotropowa (sześć fal co 60°) przestała
+                    // wyglądać jak fale — zostają poziome pasy.
+                    float b = sin(py * 3.1 + uTime * 0.7)
+                            + 0.7 * sin(py * 6.7 - uTime * 1.1 + px * 0.9)
+                            + 0.5 * sin(px * 0.9 + py * 1.4 + uTime * 0.5)
+                            + 0.4 * sin(py * 9.1 + px * 1.3 + uTime * 0.9);
+                    float streak = pow(max(b * 0.3 + 0.5, 0.0), 3.0);
                     vec3 col = tone
                              + uCol * pool * (0.14 + 0.30 * streak)
                              + uHaze * streak * 0.9 * (1.0 - far * 0.6);
@@ -518,6 +523,7 @@ export default function TreeScene() {
             surface.position.y = waterY + 0.01;
             surface.renderOrder = 1;
             root.add(surface);
+            waterMat = surface.material as THREE.ShaderMaterial;
 
             // Opadłe płatki: te same karty, tylko płasko i z losowym obrotem
             // wokół pionu. Gęściej pod koroną niż przy krawędzi — stąd
@@ -646,6 +652,9 @@ export default function TreeScene() {
         .addScaledVector(right, -r * LIGHT_SIDE)
         .addScaledVector(UP, treeHeight * LIGHT_UP);
       uLight.value.copy(key.position).normalize();
+      if (waterMat) {
+        (waterMat.uniforms.uFwd.value as THREE.Vector2).set(fwd.x, fwd.z).normalize();
+      }
       rim.position.copy(camera.position)
         .addScaledVector(right, r * LIGHT_SIDE)
         .addScaledVector(fwd, r * 1.4)
