@@ -65,6 +65,10 @@ const FLOAT_DRIFT = 0.012;  // zasięg dryfu × wysokość drzewa
 const STARS = 900;
 const STAR_SIZE = 1.5;      // mnożnik wielkości
 const STAR_TWINKLE = 2.6;   // tempo migotania
+// Świecące motyle: krążą wokół korony, wchodzą w trakcie scrolla.
+const BUTTERFLIES = 14;
+const BUTTERFLY_FROM = 0.10;   // progress, od którego się pojawiają
+const BUTTERFLY_SIZE = 0.085;  // rozpiętość × wysokość drzewa
 const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
 const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
 // Szczyt fizycznie ten sam co przy promieniu 0.30 (0.38 × 0.30 = 0.26 × 0.44);
@@ -160,6 +164,40 @@ function starTexture() {
 }
 
 
+/** Motyl z dwóch par skrzydeł, miękkie krawędzie – pod additive świeci sam. */
+function butterflyTexture() {
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d')!;
+  ctx.globalCompositeOperation = 'lighter';
+  const wing = (cx: number, cy: number, rx: number, ry: number) => {
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+    g.addColorStop(0.0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.75)');
+    g.addColorStop(0.8, 'rgba(255,255,255,0.22)');
+    g.addColorStop(1.0, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  for (const side of [-1, 1]) {
+    wing(S / 2 + side * 30, 50, 27, 23);   // przednie
+    wing(S / 2 + side * 21, 84, 18, 17);   // tylne
+  }
+  const body = ctx.createLinearGradient(0, 28, 0, 104);
+  body.addColorStop(0, 'rgba(255,255,255,0)');
+  body.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+  body.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = body;
+  ctx.fillRect(S / 2 - 2, 28, 4, 76);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+
 export default function TreeScene() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -208,6 +246,8 @@ export default function TreeScene() {
 
     const tex = glowTexture();
     const starTex = starTexture();
+    const flyTex = butterflyTexture();
+    const uFly = { value: 0 };   // widoczność motyli, sterowana scrollem
     // Jeden uniform czasu dla kwiatów i świateł — inaczej rozjeżdżają się
     // fazy i światełka zostają w miejscu, z którego płatek już odjechał.
     const uTime = { value: 0 };
@@ -787,6 +827,100 @@ export default function TreeScene() {
           }
         }
 
+        // ── motyle ─────────────────────────────────────────────────────
+        // Cała trasa liczona w shaderze z czasu i paru liczb per motyl:
+        // okrąg wokół korony (promień, prędkość, faza) plus falowanie
+        // w pionie. Kierunek lotu to pochodna trasy, skrzydła składają się
+        // wokół osi ciała. Zero pracy na CPU, jeden draw call.
+        {
+          const base = new THREE.PlaneGeometry(1, 1, 2, 1);
+          const fg = new THREE.InstancedBufferGeometry();
+          fg.index = base.index;
+          fg.attributes.position = base.attributes.position;
+          fg.attributes.uv = base.attributes.uv;
+          fg.instanceCount = BUTTERFLIES;
+          const aA: number[] = [], aB: number[] = [], aC: number[] = [];
+          const aS: number[] = [], aCol: number[] = [];
+          const col = new THREE.Color();
+          for (let i = 0; i < BUTTERFLIES; i++) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            aA.push(
+              dir * (0.12 + Math.random() * 0.2),        // prędkość kątowa
+              Math.random() * Math.PI * 2,               // faza
+              fitSize * (0.5 + Math.random() * 0.3),     // promień okrążania: na zewnątrz korony
+              treeHeight * (0.05 + Math.random() * 0.08) // amplituda pionowa
+            );
+            aB.push(
+              0.5 + Math.random() * 0.9,                 // tempo falowania
+              Math.random() * Math.PI * 2,
+              9 + Math.random() * 5,                     // tempo machania
+              Math.random() * Math.PI * 2
+            );
+            aC.push(
+              (Math.random() - 0.5) * fitSize * 0.25,
+              treeHeight * (0.6 + Math.random() * 0.45),
+              (Math.random() - 0.5) * fitSize * 0.25
+            );
+            aS.push(treeHeight * BUTTERFLY_SIZE * (0.7 + Math.random() * 0.6));
+            col.setHSL(Math.random() < 0.5 ? 0.52 + Math.random() * 0.06 : 0.88 + Math.random() * 0.06,
+                       0.9, 0.7);
+            aCol.push(col.r, col.g, col.b);
+          }
+          fg.setAttribute('aA', new THREE.InstancedBufferAttribute(new Float32Array(aA), 4));
+          fg.setAttribute('aB', new THREE.InstancedBufferAttribute(new Float32Array(aB), 4));
+          fg.setAttribute('aCenter', new THREE.InstancedBufferAttribute(new Float32Array(aC), 3));
+          fg.setAttribute('aScale', new THREE.InstancedBufferAttribute(new Float32Array(aS), 1));
+          fg.setAttribute('aColor', new THREE.InstancedBufferAttribute(new Float32Array(aCol), 3));
+
+          const fm = new THREE.ShaderMaterial({
+            uniforms: { uTex: { value: flyTex }, uTime, uAlpha: uFly },
+            vertexShader: `
+              attribute vec4 aA;
+              attribute vec4 aB;
+              attribute vec3 aCenter;
+              attribute float aScale;
+              attribute vec3 aColor;
+              uniform float uTime;
+              varying vec2 vUv;
+              varying vec3 vColor;
+              void main() {
+                float t = uTime;
+                float ang = aA.x * t + aA.y;
+                vec3 p = aCenter + vec3(aA.z * cos(ang),
+                                        aA.w * sin(aB.x * t + aB.y),
+                                        aA.z * sin(ang));
+                // kierunek lotu = pochodna trasy w poziomie
+                vec2 h = normalize(vec2(-sin(ang), cos(ang)) * aA.x);
+                vec3 heading = vec3(h.x, 0.0, h.y);
+                vec3 right = vec3(-h.y, 0.0, h.x);
+                // skrzydła składają się do góry wokół osi ciała
+                float flap = sin(t * aB.z + aB.w) * 1.05;
+                vec3 local = vec3(position.x * cos(flap), position.y, abs(position.x) * sin(flap));
+                vec3 world = p + (right * local.x + heading * local.y + vec3(0.0, 1.0, 0.0) * local.z) * aScale;
+                vUv = uv;
+                vColor = aColor;
+                gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+              }`,
+            fragmentShader: `
+              uniform sampler2D uTex;
+              uniform float uAlpha;
+              varying vec2 vUv;
+              varying vec3 vColor;
+              void main() {
+                vec4 t = texture2D(uTex, vUv);
+                gl_FragColor = vec4(t.rgb * vColor * 1.4, t.a * uAlpha);
+              }`,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+          });
+          const flies = new THREE.Mesh(fg, fm);
+          flies.frustumCulled = false;
+          flies.renderOrder = 3;
+          root.add(flies);
+        }
+
       })
       .catch((e) => console.error('[tree] nie udało się wczytać modelu', e));
 
@@ -848,6 +982,10 @@ export default function TreeScene() {
       }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;
+      {
+        const f = Math.min(Math.max((smooth - BUTTERFLY_FROM) / 0.12, 0), 1);
+        uFly.value = f * f * (3 - 2 * f);
+      }
       renderer.render(scene, camera);
     };
     raf = requestAnimationFrame(loop);
@@ -867,6 +1005,7 @@ export default function TreeScene() {
       renderer.dispose();
       tex.dispose();
       starTex.dispose();
+      flyTex.dispose();
       scene.traverse((o: THREE.Object3D) => {
         const m = o as THREE.Mesh;
         if (m.geometry) m.geometry.dispose();
