@@ -80,6 +80,9 @@ const MOUND_STRETCH = 1.0;  // rozciągnięcie wyspy wzdłuż X, 1 = koło
 // wystarcza, bo i tak rozmywają je zmarszczki.
 const WATER_LEVEL = 0.30;   // ile pagórka zostaje nad wodą liczone od dołu
 const WATER_RES = 512;
+// Góry: walec z teksturą dookoła sceny, u podstawy schowany za wodą.
+const MOUNTAIN_H = 1.9;     // wysokość × wysokość drzewa
+const MOUNTAIN_REPEAT = 10; // ile lustrzanych powtórzeń dookoła
 const MOUND_BUMP = 0.34;    // ile nierówności (0 = gładka kopuła)
 
 // Tytuł wyłaniający się z wody na starcie; znika przy pierwszym scrollu.
@@ -547,6 +550,45 @@ export default function TreeScene() {
             water.position.y = waterY;
             root.add(water);
 
+            // ── góry ───────────────────────────────────────────────────
+            // Walec dookoła sceny, oglądany od środka. Tekstura powtarzana
+            // lustrzanie — zwykłe powtórzenie zostawia szew tam, gdzie lewa
+            // i prawa krawędź obrazka się nie zgadzają. Stoi tuż przed
+            // krawędzią wody, gdzie tafla i tak gaśnie do tła, a podstawa
+            // ma w teksturze wpisaną mgłę w kolorze wody.
+            {
+              const mR2 = waterR * 0.5 * 0.96;
+              const mTex = new THREE.TextureLoader().load('/scene/mountains.webp');
+              mTex.colorSpace = THREE.SRGBColorSpace;
+              mTex.wrapS = THREE.MirroredRepeatWrapping;
+              mTex.repeat.x = MOUNTAIN_REPEAT;
+              const mH2 = treeHeight * MOUNTAIN_H;
+              const mountains = new THREE.Mesh(
+                new THREE.CylinderGeometry(mR2, mR2, mH2, 96, 1, true),
+                new THREE.MeshBasicMaterial({
+                  map: mTex,
+                  color: 0xcdbde0,   // lekko przygaszone, żeby nie konkurowały z koroną
+                  transparent: true,
+                  side: THREE.BackSide,
+                  depthWrite: false,
+                  fog: false,
+                })
+              );
+              mountains.position.y = waterY + mH2 * 0.5 - mH2 * 0.3;   // podstawa głęboko pod wodą
+              mountains.renderOrder = -1;   // po gwiazdach, przed wodą
+              root.add(mountains);
+              // do odbicia nie wchodzą – z daleka i tak byłyby smugą,
+              // a Reflector nie lubi przezroczystych walców wokół siebie
+              if (water) {
+                const pass = water.onBeforeRender;
+                water.onBeforeRender = (...args) => {
+                  mountains.visible = false;
+                  pass.apply(water, args);
+                  mountains.visible = true;
+                };
+              }
+            }
+
             // Tafla: sam Reflector daje czerń wszędzie tam, gdzie odbija
             // puste niebo, więc wody nie było widać. Ta warstwa nad nim
             // maluje ton wody (głębia blisko, mgiełka przy horyzoncie),
@@ -600,8 +642,10 @@ export default function TreeScene() {
                              + uHaze * streak * 0.9 * (1.0 - far * 0.6);
                     // blisko odbicie prześwituje, daleko warstwa kryje w całości
                     float alpha = mix(0.6, 1.0, far);
-                    // sam brzeg płaszczyzny zlewa się z tłem
-                    float edge = 1.0 - smoothstep(uFar * 0.8, uFar, d);
+                    // Brzeg płaszczyzny: odkąd horyzont zasłaniają góry,
+                    // gaśnie tylko ostatni skrawek. Wcześniejszy szeroki
+                    // spadek do czerni rysował ciemny pas pod górami.
+                    float edge = 1.0 - smoothstep(uFar * 0.97, uFar, d);
                     gl_FragColor = vec4(mix(uBg, col, edge), mix(1.0, alpha, edge));
                   }`,
                 transparent: true,
