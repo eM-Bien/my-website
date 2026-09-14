@@ -25,6 +25,67 @@
 
 .canvas canvas { display: block; }
 
+/* Tytuł na starcie: wyłania się z wody. --sink ustawia pętla przy scrollu
+   i chowa go z powrotem. Linia wody to górna krawędź .titleClip, więc
+   tytuł musi siedzieć poniżej horyzontu sceny (ok. 50% wysokości). */
+.title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 66vh;
+  z-index: 2;
+  text-align: center;
+  pointer-events: none;
+  color: #f4e6ff;
+  font-family: system-ui, sans-serif;
+  --sink: 0%;
+}
+
+.title h1 {
+  margin: 0;
+  font-size: clamp(2.6rem, 2rem + 4vw, 6rem);
+  font-weight: 300;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.titleClip {
+  overflow: hidden;
+  padding-top: 0.15em;   /* na akcenty i ogonki */
+}
+
+.titleClip h1 {
+  transform: translateY(var(--sink));
+  animation: rise 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  text-shadow: 0 0 24px rgba(255, 150, 220, 0.55);
+}
+
+/* Odbicie: kopia do góry nogami, przezroczysta i rozmyta, gasnąca w dół. */
+.titleMirror {
+  overflow: hidden;
+  margin-top: 0.06em;
+  transform: scaleY(-1);
+  opacity: 0.28;
+  filter: blur(1.5px);
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,0.9), transparent 85%);
+  mask-image: linear-gradient(to top, rgba(0,0,0,0.9), transparent 85%);
+}
+
+.titleMirror h1 {
+  transform: translateY(var(--sink));
+  animation: rise 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes rise {
+  from { transform: translateY(110%); }
+  to   { transform: translateY(var(--sink)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .titleClip h1, .titleMirror h1 { animation: none; }
+}
+
 /* Tekst po lewej – wchodzi dopiero, gdy kamera przekadruje drzewo w prawo.
    Opacity i transform ustawia pętla renderująca, nie CSS. */
 .copy {

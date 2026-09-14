@@ -67,7 +67,7 @@ const STAR_SIZE = 1.5;      // mnożnik wielkości
 const STAR_TWINKLE = 2.6;   // tempo migotania
 // Świecące motyle: krążą wokół korony, wchodzą w trakcie scrolla.
 const BUTTERFLIES = 14;
-const BUTTERFLY_FROM = 0.10;   // progress, od którego się pojawiają
+const BUTTERFLY_FROM = 0.03;   // progress, od którego się pojawiają
 const BUTTERFLY_SIZE = 0.085;  // rozpiętość × wysokość drzewa
 const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
 const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
@@ -81,6 +81,9 @@ const MOUND_STRETCH = 1.0;  // rozciągnięcie wyspy wzdłuż X, 1 = koło
 const WATER_LEVEL = 0.30;   // ile pagórka zostaje nad wodą liczone od dołu
 const WATER_RES = 512;
 const MOUND_BUMP = 0.34;    // ile nierówności (0 = gładka kopuła)
+
+// Tytuł wyłaniający się z wody na starcie; znika przy pierwszym scrollu.
+const TITLE_OUT = 0.10;        // progress, przy którym tytuł jest już schowany
 
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
@@ -202,11 +205,13 @@ export default function TreeScene() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const copyRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = hostRef.current;
     const sectionEl = sectionRef.current;
     const copyEl = copyRef.current;
+    const titleEl = titleRef.current;
     if (!el || !sectionEl) return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -975,6 +980,13 @@ export default function TreeScene() {
       );
       camera.updateProjectionMatrix();
 
+      if (titleEl) {
+        // tytuł schodzi z powrotem w wodę, gdy zaczyna się orbita
+        const t = Math.min(Math.max(smooth / TITLE_OUT, 0), 1);
+        const e = t * t * (3 - 2 * t);
+        titleEl.style.opacity = String(1 - e);
+        titleEl.style.setProperty('--sink', `${e * 110}%`);
+      }
       if (copyEl) {
         const t = Math.min(Math.max((smooth - COPY_FROM) / COPY_SPAN, 0), 1);
         copyEl.style.opacity = String(t);
@@ -1021,6 +1033,17 @@ export default function TreeScene() {
     <section className={s.section} ref={sectionRef}>
       <div className={s.stage}>
         <div ref={hostRef} className={s.canvas} />
+        {/* Tytuł: tekst wjeżdża z dołu przez okno z overflow:hidden, którego
+            górna krawędź gra linię wody. Pod nim lustrzana kopia z maską —
+            odbicie na tafli. */}
+        <div className={s.title} ref={titleRef} aria-hidden="true">
+          <div className={s.titleClip}>
+            <h1>Lorem ipsum</h1>
+          </div>
+          <div className={s.titleMirror}>
+            <h1>Lorem ipsum</h1>
+          </div>
+        </div>
         <div className={s.copy} ref={copyRef}>
           <h2>Lorem ipsum dolor</h2>
           <p>
