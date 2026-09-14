@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# blender source assets (nie trafiaja do repo - liczy sie tylko eksport w public/scene)
+*.ply
+*.blend
+*.blend1
