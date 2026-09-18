@@ -116,7 +116,7 @@ const CLOUD_OPACITY = 0.85;
 // z prawej na lewą w miarę scrolla. Kąty w radianach od osi patrzenia:
 // ujemne = prawa strona kadru, dodatnie = lewa.
 const MOON_FROM = -0.3;
-const MOON_TO = 1.4;
+const MOON_TO = 0.9;
 // Pod koniec scrolla księżyc gaśnie – zostaje kadr z koroną i tekstem.
 const MOON_FADE_FROM = 0.7; // progress, od którego zaczyna znikać
 const MOON_FADE_SPAN = 0.18;
@@ -856,13 +856,14 @@ export default function TreeScene() {
                 if (water) {
                   const pass = water.onBeforeRender;
                   water.onBeforeRender = (...args) => {
-                    mountains.visible = false;
+                    // góry zostają w odbiciu; chmury i księżyc nie (chmury:
+                    // drugi przebieg najcięższego shadera w scenie; księżyc:
+                    // lustrzana tarcza wyglądała jak czerwone koło na wodzie)
                     clouds.visible = false;
                     // księżyc też: lustrzana tarcza pod horyzontem wygląda jak
                     // czerwone koło na wodzie; odbicie robi smuga w shaderze tafli
                     for (const b of moonBillboards) b.visible = false;
                     pass.apply(water, args);
-                    mountains.visible = true;
                     clouds.visible = true;
                     for (const b of moonBillboards) b.visible = true;
                   };
@@ -943,8 +944,9 @@ export default function TreeScene() {
                     float lane = pow(along, 60.0);
                     float glint = lane * (0.35 + 0.65 * streak) * (0.25 + 0.75 * far);
                     col += uMoonCol * glint * 1.1 * uMoonVis;
-                    // blisko odbicie prześwituje, daleko warstwa kryje w całości
-                    float alpha = mix(0.6, 1.0, far);
+                    // Warstwa nigdzie nie kryje w całości – przy horyzoncie
+                    // ma prześwitywać odbicie gór.
+                    float alpha = mix(0.6, 0.62, far);
                     // Brzeg płaszczyzny: odkąd horyzont zasłaniają góry,
                     // gaśnie tylko ostatni skrawek. Wcześniejszy szeroki
                     // spadek do czerni rysował ciemny pas pod górami.
