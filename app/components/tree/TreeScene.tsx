@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
-import s from './TreeScene.module.css';
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { Reflector } from "three/examples/jsm/objects/Reflector.js";
+import s from "./TreeScene.module.css";
 
 /**
  * Drzewo w three.js, kamera na torze sterowanym scrollem.
@@ -23,26 +23,47 @@ import s from './TreeScene.module.css';
  */
 
 type Key = {
-  at: number;      // progress scrolla 0..1
-  angle: number;   // kąt orbity w radianach
-  radius: number;  // odległość kamery od osi drzewa (× wysokość drzewa)
-  height: number;  // wysokość kamery (× wysokość drzewa)
-  look: number;    // punkt patrzenia (× wysokość drzewa)
-  shiftX: number;  // przesunięcie drzewa w kadrze: 0 = środek, 1 = w prawo
+  at: number; // progress scrolla 0..1
+  angle: number; // kąt orbity w radianach
+  radius: number; // odległość kamery od osi drzewa (× wysokość drzewa)
+  height: number; // wysokość kamery (× wysokość drzewa)
+  look: number; // punkt patrzenia (× wysokość drzewa)
+  shiftX: number; // przesunięcie drzewa w kadrze: 0 = środek, 1 = w prawo
 };
 
 const KEYS: Key[] = [
-  { at: 0.0,  angle: 0,              radius: 2.6,  height: 0.60, look: 0.42, shiftX: 0 },
-  { at: 0.30, angle: Math.PI,        radius: 1.55, height: 0.56, look: 0.44, shiftX: 0 },
-  { at: 0.60, angle: Math.PI * 2,    radius: 1.40, height: 0.50, look: 0.42, shiftX: 0 },
+  { at: 0.0, angle: 0, radius: 2.6, height: 0.6, look: 0.42, shiftX: 0 },
+  {
+    at: 0.3,
+    angle: Math.PI,
+    radius: 1.55,
+    height: 0.56,
+    look: 0.44,
+    shiftX: 0,
+  },
+  {
+    at: 0.6,
+    angle: Math.PI * 2,
+    radius: 1.4,
+    height: 0.5,
+    look: 0.42,
+    shiftX: 0,
+  },
   // dojazd i przekadrowanie: korona ucieka w prawo, lewa strona zostaje pusta
-  { at: 1.0,  angle: Math.PI * 2.25, radius: 0.80, height: 0.82, look: 0.86, shiftX: 0.72 },
+  {
+    at: 1.0,
+    angle: Math.PI * 2.25,
+    radius: 0.8,
+    height: 0.82,
+    look: 0.86,
+    shiftX: 0.72,
+  },
 ];
 
 // Korona: kwiaty sadzone w kodzie na wierzchołkach gałęzi modelu.
-const BLOSSOMS   = 42000;   // ile kart (2 trójkąty każda, jeden draw call)
-const PETAL_SIZE = 0.028;   // bok karty × wysokość drzewa
-const BLOSSOM_FROM = 0.34;  // od jakiej wysokości drzewa zaczyna się korona
+const BLOSSOMS = 42000; // ile kart (2 trójkąty każda, jeden draw call)
+const PETAL_SIZE = 0.028; // bok karty × wysokość drzewa
+const BLOSSOM_FROM = 0.34; // od jakiej wysokości drzewa zaczyna się korona
 // Kora: mnożnik na teksturze (1 = jak w modelu). Domyślna jest jasnoszara
 // i przy różowej koronie wygląda wypłowiale.
 const BARK_DARKEN = 0.42;
@@ -59,36 +80,59 @@ const SHADE_GAIN = 1.15;
 // Podłoże: miękka poświata pod koroną i opadłe płatki. Bez tego drzewo
 // wisi w próżni — pień kończy się w połowie kadru i nie ma się o co oprzeć.
 const GROUND_PETALS = 1200;
-const FLOAT_PETALS = 700;   // płatki dryfujące po wodzie
-const FLOAT_DRIFT = 0.012;  // zasięg dryfu × wysokość drzewa
+const FLOAT_PETALS = 700; // płatki dryfujące po wodzie
+const FLOAT_DRIFT = 0.012; // zasięg dryfu × wysokość drzewa
 // Gwiazdy: kopuła daleko za drzewem, poniżej horyzontu chowa je woda.
 const STARS = 900;
-const STAR_SIZE = 1.5;      // mnożnik wielkości
-const STAR_TWINKLE = 2.6;   // tempo migotania
+const STAR_SIZE = 1.5; // mnożnik wielkości
+const STAR_TWINKLE = 2.6; // tempo migotania
 // Świecące motyle: krążą wokół korony, wchodzą w trakcie scrolla.
 const BUTTERFLIES = 14;
-const BUTTERFLY_FROM = 0.03;   // progress, od którego się pojawiają
-const BUTTERFLY_SIZE = 0.085;  // rozpiętość × wysokość drzewa
-const MOUND_H = 0.17;       // wysokość pagórka × wysokość drzewa
-const MOUND_R = 0.44;       // promień pagórka × rozmiar drzewa
+const BUTTERFLY_FROM = 0.03; // progress, od którego się pojawiają
+const BUTTERFLY_SIZE = 0.085; // rozpiętość × wysokość drzewa
+const MOUND_H = 0.17; // wysokość pagórka × wysokość drzewa
+const MOUND_R = 0.44; // promień pagórka × rozmiar drzewa
 // Szczyt fizycznie ten sam co przy promieniu 0.30 (0.38 × 0.30 = 0.26 × 0.44);
 // zmienia się tylko długość zbocza — łagodnie wchodzi w wodę.
-const MOUND_TOP = 0.26;     // jaka część promienia jest płaskim szczytem
-const MOUND_STRETCH = 1.0;  // rozciągnięcie wyspy wzdłuż X, 1 = koło
+const MOUND_TOP = 0.26; // jaka część promienia jest płaskim szczytem
+const MOUND_STRETCH = 1.0; // rozciągnięcie wyspy wzdłuż X, 1 = koło
 // Woda: poziom liczony od szczytu pagórka, więc zmiana MOUND_H nie zatapia
 // wyspy. Rozdzielczość odbicia to osobny render sceny co klatkę — 512 px
 // wystarcza, bo i tak rozmywają je zmarszczki.
-const WATER_LEVEL = 0.30;   // ile pagórka zostaje nad wodą liczone od dołu
+const WATER_LEVEL = 0.3; // ile pagórka zostaje nad wodą liczone od dołu
 const WATER_RES = 512;
 // Góry: walec z teksturą dookoła sceny, u podstawy schowany za wodą.
-const MOUNTAIN_H = 1.9;     // wysokość × wysokość drzewa
-const MOUNTAIN_REPEAT = 10; // ile lustrzanych powtórzeń dookoła
-const MOUND_BUMP = 0.34;    // ile nierówności (0 = gładka kopuła)
+const MOUNTAIN_H = 3.0; // wysokość × wysokość drzewa
+const MOUNTAIN_REPEAT = 7; // ile lustrzanych powtórzeń dookoła
+// Chmury: drugi walec za górami, kształt liczony szumem w shaderze.
+const CLOUD_H = 3.2; // wysokość × wysokość drzewa
+const CLOUD_COVER = 0.42; // próg szumu: niżej = więcej chmur
+const CLOUD_SOFT = 0.22; // miękkość krawędzi
+const CLOUD_DRIFT = 0.012; // obrót dookoła, rad/s
+const CLOUD_EVOLVE = 0.03; // jak szybko zmieniają kształt
+const CLOUD_OPACITY = 0.85;
+// Księżyc: wielka różowa tarcza za górami, świeci na chmury i na wodę.
+// Księżyc jedzie z kamerą (zawsze za drzewem), a w kadrze wędruje
+// z prawej na lewą w miarę scrolla. Kąty w radianach od osi patrzenia:
+// ujemne = prawa strona kadru, dodatnie = lewa.
+const MOON_FROM = -0.3;
+const MOON_TO = 1.4;
+// Pod koniec scrolla księżyc gaśnie – zostaje kadr z koroną i tekstem.
+const MOON_FADE_FROM = 0.7; // progress, od którego zaczyna znikać
+const MOON_FADE_SPAN = 0.18;
+const MOON_AZIMUTH = Math.PI - 0.5; // pozycja startowa (nadpisywana w pętli)
+const MOON_SIZE = 0.34; // promień tarczy = MOON_SIZE × wysokość drzewa × 5
+const MOON_ELEV = 0.55; // ile tarczy wystaje ponad szczyty na starcie (0..1)
+const MOON_RISE = 0.5; // o ile średnic wznosi się do końca scrolla
+const MOON_RISE_SPAN = 0.7; // w jakiej części scrolla trwa wznoszenie
+const MOON_COLOR = 0xff6b86;
+const MOON_GLOW = 0.5; // siła poświaty wokół tarczy (obrazek ma własną)
+const MOUND_BUMP = 0.34; // ile nierówności (0 = gładka kopuła)
 
 // Tytuł wyłaniający się z wody na starcie; znika przy pierwszym scrollu.
-const TITLE_OUT = 0.10;        // progress, przy którym tytuł jest już schowany
+const TITLE_OUT = 0.1; // progress, przy którym tytuł jest już schowany
 
-const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
+const COPY_FROM = 0.72; // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
 function sampleKeys(p: number) {
@@ -118,14 +162,15 @@ function sampleKeys(p: number) {
 /** Miękka kropka jako tekstura – to ona robi „świecenie", nie bloom. */
 function glowTexture() {
   const S = 64;
-  const c = document.createElement('canvas');
+  const c = document.createElement("canvas");
   c.width = c.height = S;
-  const ctx = c.getContext('2d')!;
+  const ctx = c.getContext("2d")!;
   const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  g.addColorStop(0.0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.25, 'rgba(170,225,255,0.85)');
-  g.addColorStop(0.55, 'rgba(60,150,255,0.28)');
-  g.addColorStop(1.0, 'rgba(0,80,255,0)');
+  // ciepłe, pod różowy księżyc – niebieskie punkty gryzły się z resztą
+  g.addColorStop(0.0, "rgba(255,255,255,1)");
+  g.addColorStop(0.25, "rgba(255,205,230,0.85)");
+  g.addColorStop(0.55, "rgba(255,110,170,0.28)");
+  g.addColorStop(1.0, "rgba(255,60,120,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, S, S);
   const t = new THREE.CanvasTexture(c);
@@ -133,18 +178,24 @@ function glowTexture() {
   return t;
 }
 
-
 /** Czteroramienna gwiazdka: jasny rdzeń i dwa cienkie, długie promienie. */
 function starTexture() {
   const S = 128;
-  const c = document.createElement('canvas');
+  const c = document.createElement("canvas");
   c.width = c.height = S;
-  const ctx = c.getContext('2d')!;
-  ctx.globalCompositeOperation = 'lighter';
-  const core = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S * 0.18);
-  core.addColorStop(0.0, 'rgba(255,255,255,1)');
-  core.addColorStop(0.35, 'rgba(200,215,255,0.8)');
-  core.addColorStop(1.0, 'rgba(120,150,255,0)');
+  const ctx = c.getContext("2d")!;
+  ctx.globalCompositeOperation = "lighter";
+  const core = ctx.createRadialGradient(
+    S / 2,
+    S / 2,
+    0,
+    S / 2,
+    S / 2,
+    S * 0.18,
+  );
+  core.addColorStop(0.0, "rgba(255,255,255,1)");
+  core.addColorStop(0.35, "rgba(200,215,255,0.8)");
+  core.addColorStop(1.0, "rgba(120,150,255,0)");
   ctx.fillStyle = core;
   ctx.fillRect(0, 0, S, S);
   // promienie: wąskie w środku, gasnące ku końcom
@@ -153,9 +204,9 @@ function starTexture() {
     ctx.translate(S / 2, S / 2);
     ctx.rotate(rot);
     const g = ctx.createLinearGradient(-S / 2, 0, S / 2, 0);
-    g.addColorStop(0.0, 'rgba(160,190,255,0)');
-    g.addColorStop(0.5, 'rgba(240,245,255,0.95)');
-    g.addColorStop(1.0, 'rgba(160,190,255,0)');
+    g.addColorStop(0.0, "rgba(160,190,255,0)");
+    g.addColorStop(0.5, "rgba(240,245,255,0.95)");
+    g.addColorStop(1.0, "rgba(160,190,255,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(-S / 2, 0);
@@ -169,40 +220,38 @@ function starTexture() {
   return t;
 }
 
-
 /** Motyl z dwóch par skrzydeł, miękkie krawędzie – pod additive świeci sam. */
 function butterflyTexture() {
   const S = 128;
-  const c = document.createElement('canvas');
+  const c = document.createElement("canvas");
   c.width = c.height = S;
-  const ctx = c.getContext('2d')!;
-  ctx.globalCompositeOperation = 'lighter';
+  const ctx = c.getContext("2d")!;
+  ctx.globalCompositeOperation = "lighter";
   const wing = (cx: number, cy: number, rx: number, ry: number) => {
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
-    g.addColorStop(0.0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.75)');
-    g.addColorStop(0.8, 'rgba(255,255,255,0.22)');
-    g.addColorStop(1.0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.0, "rgba(255,255,255,1)");
+    g.addColorStop(0.45, "rgba(255,255,255,0.75)");
+    g.addColorStop(0.8, "rgba(255,255,255,0.22)");
+    g.addColorStop(1.0, "rgba(255,255,255,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
   };
   for (const side of [-1, 1]) {
-    wing(S / 2 + side * 30, 50, 27, 23);   // przednie
-    wing(S / 2 + side * 21, 84, 18, 17);   // tylne
+    wing(S / 2 + side * 30, 50, 27, 23); // przednie
+    wing(S / 2 + side * 21, 84, 18, 17); // tylne
   }
   const body = ctx.createLinearGradient(0, 28, 0, 104);
-  body.addColorStop(0, 'rgba(255,255,255,0)');
-  body.addColorStop(0.5, 'rgba(255,255,255,0.9)');
-  body.addColorStop(1, 'rgba(255,255,255,0)');
+  body.addColorStop(0, "rgba(255,255,255,0)");
+  body.addColorStop(0.5, "rgba(255,255,255,0.9)");
+  body.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = body;
   ctx.fillRect(S / 2 - 2, 28, 4, 76);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-
 
 export default function TreeScene() {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -217,7 +266,9 @@ export default function TreeScene() {
     const titleEl = titleRef.current;
     if (!el || !sectionEl) return;
 
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -226,7 +277,12 @@ export default function TreeScene() {
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 200);
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      el.clientWidth / el.clientHeight,
+      0.1,
+      200,
+    );
 
     // Ambient trzymany nisko: przy 2.2 kierunek światła ginął i obrót
     // wyglądał płasko niezależnie od pozycji lamp.
@@ -244,10 +300,20 @@ export default function TreeScene() {
     scene.add(root);
 
     let treeHeight = 10;
-    let fitSize = 10;   // większy z wymiarów: szerokość vs wysokość
+    let fitSize = 10; // większy z wymiarów: szerokość vs wysokość
     let points: THREE.Points | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
     let water: Reflector | null = null;
+    let moonBillboards: THREE.Object3D[] = [];
+    let moonBaseY = 0;
+    let moonRise = 0;
+    let moonDist = 0;
+    const moonMats: {
+      disc?: THREE.MeshBasicMaterial;
+      halo?: THREE.ShaderMaterial;
+    } = {};
+    let cloudMat: THREE.ShaderMaterial | null = null;
+
     let disposed = false;
     let raf = 0;
     let smooth = 0;
@@ -255,7 +321,7 @@ export default function TreeScene() {
     const tex = glowTexture();
     const starTex = starTexture();
     const flyTex = butterflyTexture();
-    const uFly = { value: 0 };   // widoczność motyli, sterowana scrollem
+    const uFly = { value: 0 }; // widoczność motyli, sterowana scrollem
     // Jeden uniform czasu dla kwiatów i świateł — inaczej rozjeżdżają się
     // fazy i światełka zostają w miejscu, z którego płatek już odjechał.
     const uTime = { value: 0 };
@@ -267,159 +333,183 @@ export default function TreeScene() {
     // (252 kB) leży w public/draco i ładuje się dopiero przy wczytywaniu.
     const gltfLoader = new GLTFLoader();
     const draco = new DRACOLoader();
-    draco.setDecoderPath('/draco/');
+    draco.setDecoderPath("/draco/");
     gltfLoader.setDRACOLoader(draco);
 
     Promise.all([
-      gltfLoader.loadAsync('/scene/tree.glb'),
-      fetch('/scene/tips.json').then((r) => r.json()),
+      gltfLoader.loadAsync("/scene/tree.glb"),
+      fetch("/scene/tips.json").then((r) => r.json()),
     ])
-      .then(([gltf, data]: [{ scene: THREE.Group }, { tips: number[][]; height: number }]) => {
-        if (disposed) return;
+      .then(
+        ([gltf, data]: [
+          { scene: THREE.Group },
+          { tips: number[][]; height: number },
+        ]) => {
+          if (disposed) return;
 
-        gltf.scene.traverse((o: THREE.Object3D) => {
-          const m = o as THREE.Mesh;
-          if (!m.isMesh) return;
-          const mats = Array.isArray(m.material) ? m.material : [m.material];
-          for (const mm of mats) {
-            const std = mm as THREE.MeshStandardMaterial;
-            if (!std) continue;
-            // Płatki przychodzą z Blendera jako alpha BLEND. Przezroczystość
-            // w koronie wymaga sortowania per trójkąt, którego nie ma – płatki
-            // znikają za sobą. alphaTest daje ostrą maskę i zero sortowania.
-            //
-            // Decyduje WYŁĄCZNIE tryb alfy z glTF, nie obecność tekstury.
-            // Tekstura pnia to łatka na szew: 91% jej pikseli ma alfę 0,
-            // więc alphaTest na materiale OPAQUE wycinał cały pień.
-            if (std.transparent || std.alphaTest > 0) {
-              std.transparent = false;
-              std.alphaTest = 0.5;
-            } else {
-              std.alphaTest = 0;
-            }
-            std.side = THREE.DoubleSide;   // płatki to płaskie karty
-            std.envMapIntensity = 0.4;
-            if (/trunk|bark|branch/i.test(std.name)) {
-              std.color.multiplyScalar(BARK_DARKEN);
-            }
-          }
-        });
-        // Awaryjnie: gdyby pień znów przyszedł z łatką na szew zamiast kory
-        // (91% pikseli tej tekstury jest przezroczystych, pod spodem czerń),
-        // pożyczamy mu teksturę z gałęzi.
-        {
-          let bark: THREE.Texture | null = null;
           gltf.scene.traverse((o: THREE.Object3D) => {
             const m = o as THREE.Mesh;
             if (!m.isMesh) return;
-            const std = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
-            if (/bark|branch/i.test(std.name) && std.map) bark = std.map;
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            for (const mm of mats) {
+              const std = mm as THREE.MeshStandardMaterial;
+              if (!std) continue;
+              // Płatki przychodzą z Blendera jako alpha BLEND. Przezroczystość
+              // w koronie wymaga sortowania per trójkąt, którego nie ma – płatki
+              // znikają za sobą. alphaTest daje ostrą maskę i zero sortowania.
+              //
+              // Decyduje WYŁĄCZNIE tryb alfy z glTF, nie obecność tekstury.
+              // Tekstura pnia to łatka na szew: 91% jej pikseli ma alfę 0,
+              // więc alphaTest na materiale OPAQUE wycinał cały pień.
+              if (std.transparent || std.alphaTest > 0) {
+                std.transparent = false;
+                std.alphaTest = 0.5;
+              } else {
+                std.alphaTest = 0;
+              }
+              std.side = THREE.DoubleSide; // płatki to płaskie karty
+              std.envMapIntensity = 0.4;
+              if (/trunk|bark|branch/i.test(std.name)) {
+                std.color.multiplyScalar(BARK_DARKEN);
+              }
+            }
           });
-          if (bark) {
+          // Awaryjnie: gdyby pień znów przyszedł z łatką na szew zamiast kory
+          // (91% pikseli tej tekstury jest przezroczystych, pod spodem czerń),
+          // pożyczamy mu teksturę z gałęzi.
+          {
+            let bark: THREE.Texture | null = null;
             gltf.scene.traverse((o: THREE.Object3D) => {
               const m = o as THREE.Mesh;
               if (!m.isMesh) return;
-              const std = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
-              if (/trunk/i.test(std.name) && /seam/i.test(std.map?.name || '')) {
-                std.map = bark;
-                std.needsUpdate = true;
+              const std = (
+                Array.isArray(m.material) ? m.material[0] : m.material
+              ) as THREE.MeshStandardMaterial;
+              if (/bark|branch/i.test(std.name) && std.map) bark = std.map;
+            });
+            if (bark) {
+              gltf.scene.traverse((o: THREE.Object3D) => {
+                const m = o as THREE.Mesh;
+                if (!m.isMesh) return;
+                const std = (
+                  Array.isArray(m.material) ? m.material[0] : m.material
+                ) as THREE.MeshStandardMaterial;
+                if (
+                  /trunk/i.test(std.name) &&
+                  /seam/i.test(std.map?.name || "")
+                ) {
+                  std.map = bark;
+                  std.needsUpdate = true;
+                }
+              });
+            }
+          }
+          root.add(gltf.scene);
+          treeHeight = data.height || 10;
+          {
+            const bb = new THREE.Box3().setFromObject(gltf.scene);
+            const sz = bb.getSize(new THREE.Vector3());
+            fitSize = Math.max(sz.y, Math.max(sz.x, sz.z) * 0.85);
+          }
+
+          // ── kwiaty ─────────────────────────────────────────────────────
+          // Korona z modelu to była ślepa uliczka: płatek ma tam ~3 cm przy
+          // drzewie 7 m (dwa piksele w kadrze), więc żeby cokolwiek było
+          // widać, trzeba ich milion — i tyle samo trójkątów w glb.
+          // Zamiast tego sadzimy własne karty na wierzchołkach gałęzi:
+          // jeden InstancedMesh, jeden draw call, gęstość i kolor do
+          // wyklikania w stałych poniżej.
+          {
+            let petalMap: THREE.Texture | null = null;
+            const spots: number[] = [];
+            const hide: THREE.Mesh[] = [];
+
+            gltf.scene.updateWorldMatrix(true, true);
+            gltf.scene.traverse((o: THREE.Object3D) => {
+              const m = o as THREE.Mesh;
+              if (!m.isMesh) return;
+              const std = (
+                Array.isArray(m.material) ? m.material[0] : m.material
+              ) as THREE.MeshStandardMaterial;
+              if (/petal|canopy|blossom/i.test(std.name + m.name)) {
+                if (std.map) petalMap = std.map;
+                hide.push(m); // oryginalne płatki zastępujemy
+                return;
+              }
+              if (/trunk/i.test(m.name)) return; // na pniu kwiaty nie rosną
+              const pos = m.geometry.attributes.position;
+              const v = new THREE.Vector3();
+              for (let i = 0; i < pos.count; i++) {
+                v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+                if (v.y > treeHeight * BLOSSOM_FROM) spots.push(v.x, v.y, v.z);
               }
             });
-          }
-        }
-        root.add(gltf.scene);
-        treeHeight = data.height || 10;
-        {
-          const bb = new THREE.Box3().setFromObject(gltf.scene);
-          const sz = bb.getSize(new THREE.Vector3());
-          fitSize = Math.max(sz.y, Math.max(sz.x, sz.z) * 0.85);
-        }
-
-        // ── kwiaty ─────────────────────────────────────────────────────
-        // Korona z modelu to była ślepa uliczka: płatek ma tam ~3 cm przy
-        // drzewie 7 m (dwa piksele w kadrze), więc żeby cokolwiek było
-        // widać, trzeba ich milion — i tyle samo trójkątów w glb.
-        // Zamiast tego sadzimy własne karty na wierzchołkach gałęzi:
-        // jeden InstancedMesh, jeden draw call, gęstość i kolor do
-        // wyklikania w stałych poniżej.
-        {
-          let petalMap: THREE.Texture | null = null;
-          const spots: number[] = [];
-          const hide: THREE.Mesh[] = [];
-
-          gltf.scene.updateWorldMatrix(true, true);
-          gltf.scene.traverse((o: THREE.Object3D) => {
-            const m = o as THREE.Mesh;
-            if (!m.isMesh) return;
-            const std = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
-            if (/petal|canopy|blossom/i.test(std.name + m.name)) {
-              if (std.map) petalMap = std.map;
-              hide.push(m);                    // oryginalne płatki zastępujemy
-              return;
-            }
-            if (/trunk/i.test(m.name)) return; // na pniu kwiaty nie rosną
-            const pos = m.geometry.attributes.position;
-            const v = new THREE.Vector3();
-            for (let i = 0; i < pos.count; i++) {
-              v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
-              if (v.y > treeHeight * BLOSSOM_FROM) spots.push(v.x, v.y, v.z);
-            }
-          });
-          // Gałęzie z pierwszej decymacji to iglice o proporcji 1:1400 —
-          // sterczą poza koronę jak drzazgi. Mierzymy wydłużenie trójkątów
-          // i chowamy siatki, które się rozjechały; na czystym modelu ta
-          // reguła nigdy nie zadziała.
-          gltf.scene.traverse((o: THREE.Object3D) => {
-            const m = o as THREE.Mesh;
-            if (!m.isMesh || hide.includes(m) || /trunk/i.test(m.name)) return;
-            const pos = m.geometry.attributes.position;
-            const idx = m.geometry.index;
-            const tris = idx ? idx.count / 3 : pos.count / 3;
-            const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-            const ratios: number[] = [];
-            const step = Math.max(1, Math.floor(tris / 200));
-            for (let t = 0; t < tris; t += step) {
-              const g = (i: number) => (idx ? idx.getX(t * 3 + i) : t * 3 + i);
-              a.fromBufferAttribute(pos, g(0));
-              b.fromBufferAttribute(pos, g(1));
-              c.fromBufferAttribute(pos, g(2));
-              const e = [a.distanceTo(b), b.distanceTo(c), c.distanceTo(a)].sort((x, y) => x - y);
-              ratios.push(e[2] / Math.max(e[0], 1e-6));
-            }
-            ratios.sort((x, y) => x - y);
-            if (ratios.length && ratios[ratios.length >> 1] > 40) m.visible = false;
-          });
-
-          for (const m of hide) m.visible = false;
-
-          const n = spots.length / 3;
-          if (n > 0) {
-            const geo = new THREE.PlaneGeometry(1, 1);
-            const mat = new THREE.MeshStandardMaterial({
-              map: petalMap,
-              color: 0xd8cff0,   // odbicie jasne – warstwa tafli i tak je tłumi
-              roughness: 0.85,
-              metalness: 0,
-              // Tekstura płatka jest blada (średnio 176,144,144), a światło
-              // w scenie zimne — bez podbicia korona wychodzi szarobura.
-              emissive: new THREE.Color(0xff6fae),
-              emissiveIntensity: 0.18,
-              side: THREE.DoubleSide,
-              alphaTest: 0.5,               // maska zamiast blendu: bez sortowania
-              transparent: false,
+            // Gałęzie z pierwszej decymacji to iglice o proporcji 1:1400 —
+            // sterczą poza koronę jak drzazgi. Mierzymy wydłużenie trójkątów
+            // i chowamy siatki, które się rozjechały; na czystym modelu ta
+            // reguła nigdy nie zadziała.
+            gltf.scene.traverse((o: THREE.Object3D) => {
+              const m = o as THREE.Mesh;
+              if (!m.isMesh || hide.includes(m) || /trunk/i.test(m.name))
+                return;
+              const pos = m.geometry.attributes.position;
+              const idx = m.geometry.index;
+              const tris = idx ? idx.count / 3 : pos.count / 3;
+              const a = new THREE.Vector3(),
+                b = new THREE.Vector3(),
+                c = new THREE.Vector3();
+              const ratios: number[] = [];
+              const step = Math.max(1, Math.floor(tris / 200));
+              for (let t = 0; t < tris; t += step) {
+                const g = (i: number) =>
+                  idx ? idx.getX(t * 3 + i) : t * 3 + i;
+                a.fromBufferAttribute(pos, g(0));
+                b.fromBufferAttribute(pos, g(1));
+                c.fromBufferAttribute(pos, g(2));
+                const e = [
+                  a.distanceTo(b),
+                  b.distanceTo(c),
+                  c.distanceTo(a),
+                ].sort((x, y) => x - y);
+                ratios.push(e[2] / Math.max(e[0], 1e-6));
+              }
+              ratios.sort((x, y) => x - y);
+              if (ratios.length && ratios[ratios.length >> 1] > 40)
+                m.visible = false;
             });
-            // Kołysanie liczone w shaderze: 42 tys. macierzy przeliczanych
-            // co klatkę na CPU zjadłoby więcej niż cała reszta sceny.
-            mat.onBeforeCompile = (shader) => {
-              shader.uniforms.uTime = uTime;
-              shader.uniforms.uLight = uLight;
-              shader.uniforms.uWind = { value: treeHeight * WIND };
-              shader.uniforms.uH = { value: treeHeight };
-              shader.vertexShader =
-                'uniform float uTime;\nuniform float uWind;\nuniform float uH;\n' +
-                'uniform vec3 uLight;\nvarying float vShade;\n' +
-                `#define SHADE_MIN ${SHADE_MIN.toFixed(2)}\n#define SHADE_GAIN ${SHADE_GAIN.toFixed(2)}\n` +
-                shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+
+            for (const m of hide) m.visible = false;
+
+            const n = spots.length / 3;
+            if (n > 0) {
+              const geo = new THREE.PlaneGeometry(1, 1);
+              const mat = new THREE.MeshStandardMaterial({
+                map: petalMap,
+                color: 0xd8cff0, // odbicie jasne – warstwa tafli i tak je tłumi
+                roughness: 0.85,
+                metalness: 0,
+                // Tekstura płatka jest blada (średnio 176,144,144), a światło
+                // w scenie zimne — bez podbicia korona wychodzi szarobura.
+                emissive: new THREE.Color(0xff6fae),
+                emissiveIntensity: 0.18,
+                side: THREE.DoubleSide,
+                alphaTest: 0.5, // maska zamiast blendu: bez sortowania
+                transparent: false,
+              });
+              // Kołysanie liczone w shaderze: 42 tys. macierzy przeliczanych
+              // co klatkę na CPU zjadłoby więcej niż cała reszta sceny.
+              mat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = uTime;
+                shader.uniforms.uLight = uLight;
+                shader.uniforms.uWind = { value: treeHeight * WIND };
+                shader.uniforms.uH = { value: treeHeight };
+                shader.vertexShader =
+                  "uniform float uTime;\nuniform float uWind;\nuniform float uH;\n" +
+                  "uniform vec3 uLight;\nvarying float vShade;\n" +
+                  `#define SHADE_MIN ${SHADE_MIN.toFixed(2)}\n#define SHADE_GAIN ${SHADE_GAIN.toFixed(2)}\n` +
+                  shader.vertexShader.replace(
+                    "#include <begin_vertex>",
+                    `#include <begin_vertex>
                 #ifdef USE_INSTANCING
                   vec3 iPos = instanceMatrix[3].xyz;
                   // offset wraca potem przez instanceMatrix, więc dzielimy
@@ -438,186 +528,389 @@ export default function TreeScene() {
                   vShade = SHADE_MIN + SHADE_GAIN * max(dot(outward, uLight), 0.0);
                 #else
                   vShade = 1.0;
-                #endif`);
-              shader.fragmentShader = 'varying float vShade;\n' +
-                shader.fragmentShader.replace('#include <map_fragment>',
-                  '#include <map_fragment>\n  diffuseColor.rgb *= vShade;');
-            };
+                #endif`,
+                  );
+                shader.fragmentShader =
+                  "varying float vShade;\n" +
+                  shader.fragmentShader.replace(
+                    "#include <map_fragment>",
+                    "#include <map_fragment>\n  diffuseColor.rgb *= vShade;",
+                  );
+              };
 
-            const inst = new THREE.InstancedMesh(geo, mat, BLOSSOMS);
-            const dummy = new THREE.Object3D();
-            const tint = new THREE.Color();
-            const base = new THREE.Vector3();
-            const size = treeHeight * PETAL_SIZE;
-            for (let i = 0; i < BLOSSOMS; i++) {
-              const k = ((Math.random() * n) | 0) * 3;
-              base.set(spots[k], spots[k + 1], spots[k + 2]);
-              // rozrzut wokół gałązki, żeby kwiaty nie leżały na siatce
-              dummy.position.set(
-                base.x + (Math.random() - 0.5) * size * 2.2,
-                base.y + (Math.random() - 0.5) * size * 1.6,
-                base.z + (Math.random() - 0.5) * size * 2.2
-              );
-              dummy.rotation.set(
-                Math.random() * Math.PI,
-                Math.random() * Math.PI,
-                Math.random() * Math.PI
-              );
-              const sc = size * (0.65 + Math.random() * 0.8);
-              dummy.scale.set(sc, sc, sc);
-              dummy.updateMatrix();
-              inst.setMatrixAt(i, dummy.matrix);
-              // odrobina wariacji, inaczej korona wygląda jak jednolita plama
-              tint.setHSL(0.91 + Math.random() * 0.05, 0.62, 0.56 + Math.random() * 0.22);
-              inst.setColorAt(i, tint);
-            }
-            inst.instanceMatrix.needsUpdate = true;
-            if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-            inst.frustumCulled = false;      // bbox instancji i tak obejmuje całą koronę
-            root.add(inst);
-
-            // ── pagórek ────────────────────────────────────────────────
-            // Drzewo stojące na płaskim zerze wygląda jak wklejone. Kopuła
-            // z siatki 120×120, wysokość liczona funkcją, a nie z tekstury —
-            // ta sama funkcja sadza potem opadłe płatki na zboczu.
-            const mR = fitSize * MOUND_R;
-            const mH = treeHeight * MOUND_H;
-            // Promień „eliptyczny": wyspa jest wydłużona wzdłuż X, więc
-            // odległość liczymy po ściśniętej osi. Ta sama miara idzie do
-            // wysokości, koloru i rozrzutu płatków.
-            const moundT = (x: number, z: number) =>
-              Math.min(Math.hypot(x / MOUND_STRETCH, z) / mR, 1);
-            const moundAt = (x: number, z: number) => {
-              const t = moundT(x, z);
-              // Płaski szczyt: kopuła zaczyna opadać dopiero za MOUND_TOP,
-              // żeby drzewo stało na półce, a nie na czubku
-              const ts = Math.max(t - MOUND_TOP, 0) / (1 - MOUND_TOP);
-              const dome = 0.5 * Math.cos(ts * Math.PI) + 0.5;
-              const bump = Math.sin(x * 1.7 + z * 0.9) * Math.cos(z * 1.3 - x * 0.6);
-              return mH * (dome + bump * MOUND_BUMP * dome);
-            };
-
-            // Krążek, nie kwadrat: przy kwadratowej siatce widać proste
-            // krawędzie podłoża, choćby kolor gasł do tła. RingGeometry
-            // z wewnętrznym promieniem 0 daje podziały wzdłuż promienia,
-            // których CircleGeometry nie ma (tam środek to jeden wierzchołek).
-            const mGeo = new THREE.RingGeometry(0, mR * 1.35 * MOUND_STRETCH, 128, 48);
-            mGeo.rotateX(-Math.PI / 2);
-            const mp = mGeo.attributes.position;
-            const mc = new Float32Array(mp.count * 3);
-            const cTop = new THREE.Color(0x8d4a84);   // grzbiet, blisko pnia
-            const cLow = new THREE.Color(0x24162c);   // zbocze
-            const tmp = new THREE.Color();
-            for (let i = 0; i < mp.count; i++) {
-              const x = mp.getX(i), z = mp.getZ(i);
-              const t = moundT(x, z);
-              mp.setY(i, moundAt(x, z));
-              tmp.copy(cLow).lerp(cTop, Math.pow(1 - t, 2.2));
-              // Wygaszanie rozciągnięte na całe zbocze, nie tylko na rant.
-              // Pagórek oglądamy pod ostrym kątem, więc ostatnie procenty
-              // promienia to na ekranie kilka pikseli i krótka rampa czyta
-              // się jako narysowana elipsa.
-              // Odkąd jest woda, rant i tak jest pod powierzchnią — wygaszanie
-              // może być łagodne, inaczej całe zbocze robi się czarną bryłą.
-              const f = Math.min(Math.max((1.0 - t) / 0.5, 0), 1);
-              tmp.multiplyScalar(f * f * (3 - 2 * f));
-              mc[i * 3] = tmp.r; mc[i * 3 + 1] = tmp.g; mc[i * 3 + 2] = tmp.b;
-            }
-            mGeo.setAttribute('color', new THREE.BufferAttribute(mc, 3));
-            mGeo.computeVertexNormals();
-            // Lambert, nie Standard: PBR dokłada 4% odbicia lustrzanego
-            // niezależnie od albedo, więc przy mocnym kluczu całe zbocze
-            // dostawało stałe szare dno ~24/255 i wygaszanie do czerni nic
-            // nie dawało. Lambert liczy samo rozproszenie.
-            const mound = new THREE.Mesh(mGeo, new THREE.MeshLambertMaterial({
-              vertexColors: true,
-            }));
-            mound.position.y = -mH * 0.45;   // pień wchodzi w zbocze, nie stoi na nim
-            root.add(mound);
-
-            // ── woda ───────────────────────────────────────────────────
-            // Reflector renderuje scenę drugi raz z kamery odbitej względem
-            // tafli. Dlatego trzyma się małej rozdzielczości i dlatego woda
-            // powstaje po drzewie — musi mieć co odbijać.
-            const waterY = mound.position.y + mH * WATER_LEVEL;
-            const waterR = fitSize * 14;   // horyzont daleko, żeby nie rysował kreski
-            water = new Reflector(new THREE.PlaneGeometry(waterR, waterR), {
-              textureWidth: WATER_RES,
-              textureHeight: WATER_RES,
-              color: 0xd8cff0,   // odbicie jasne – warstwa tafli i tak je tłumi
-            });
-            water.rotation.x = -Math.PI / 2;
-            water.position.y = waterY;
-            root.add(water);
-
-            // ── góry ───────────────────────────────────────────────────
-            // Walec dookoła sceny, oglądany od środka. Tekstura powtarzana
-            // lustrzanie — zwykłe powtórzenie zostawia szew tam, gdzie lewa
-            // i prawa krawędź obrazka się nie zgadzają. Stoi tuż przed
-            // krawędzią wody, gdzie tafla i tak gaśnie do tła, a podstawa
-            // ma w teksturze wpisaną mgłę w kolorze wody.
-            {
-              const mR2 = waterR * 0.5 * 0.96;
-              const mTex = new THREE.TextureLoader().load('/scene/mountains.webp');
-              mTex.colorSpace = THREE.SRGBColorSpace;
-              mTex.wrapS = THREE.MirroredRepeatWrapping;
-              mTex.repeat.x = MOUNTAIN_REPEAT;
-              const mH2 = treeHeight * MOUNTAIN_H;
-              const mountains = new THREE.Mesh(
-                new THREE.CylinderGeometry(mR2, mR2, mH2, 96, 1, true),
-                new THREE.MeshBasicMaterial({
-                  map: mTex,
-                  color: 0xcdbde0,   // lekko przygaszone, żeby nie konkurowały z koroną
-                  transparent: true,
-                  side: THREE.BackSide,
-                  depthWrite: false,
-                  fog: false,
-                })
-              );
-              mountains.position.y = waterY + mH2 * 0.5 - mH2 * 0.3;   // podstawa głęboko pod wodą
-              mountains.renderOrder = -1;   // po gwiazdach, przed wodą
-              root.add(mountains);
-              // do odbicia nie wchodzą – z daleka i tak byłyby smugą,
-              // a Reflector nie lubi przezroczystych walców wokół siebie
-              if (water) {
-                const pass = water.onBeforeRender;
-                water.onBeforeRender = (...args) => {
-                  mountains.visible = false;
-                  pass.apply(water, args);
-                  mountains.visible = true;
-                };
+              const inst = new THREE.InstancedMesh(geo, mat, BLOSSOMS);
+              const dummy = new THREE.Object3D();
+              const tint = new THREE.Color();
+              const base = new THREE.Vector3();
+              const size = treeHeight * PETAL_SIZE;
+              for (let i = 0; i < BLOSSOMS; i++) {
+                const k = ((Math.random() * n) | 0) * 3;
+                base.set(spots[k], spots[k + 1], spots[k + 2]);
+                // rozrzut wokół gałązki, żeby kwiaty nie leżały na siatce
+                dummy.position.set(
+                  base.x + (Math.random() - 0.5) * size * 2.2,
+                  base.y + (Math.random() - 0.5) * size * 1.6,
+                  base.z + (Math.random() - 0.5) * size * 2.2,
+                );
+                dummy.rotation.set(
+                  Math.random() * Math.PI,
+                  Math.random() * Math.PI,
+                  Math.random() * Math.PI,
+                );
+                const sc = size * (0.65 + Math.random() * 0.8);
+                dummy.scale.set(sc, sc, sc);
+                dummy.updateMatrix();
+                inst.setMatrixAt(i, dummy.matrix);
+                // odrobina wariacji, inaczej korona wygląda jak jednolita plama
+                tint.setHSL(
+                  0.91 + Math.random() * 0.05,
+                  0.62,
+                  0.56 + Math.random() * 0.22,
+                );
+                inst.setColorAt(i, tint);
               }
-            }
+              inst.instanceMatrix.needsUpdate = true;
+              if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+              inst.frustumCulled = false; // bbox instancji i tak obejmuje całą koronę
+              root.add(inst);
 
-            // Tafla: sam Reflector daje czerń wszędzie tam, gdzie odbija
-            // puste niebo, więc wody nie było widać. Ta warstwa nad nim
-            // maluje ton wody (głębia blisko, mgiełka przy horyzoncie),
-            // różową poświatę pod drzewem i zmarszczki; odbicie prześwituje
-            // przez nią, a przy krawędzi płaszczyzny kolor zlewa się z tłem.
-            const surface = new THREE.Mesh(
-              new THREE.PlaneGeometry(waterR, waterR),
-              new THREE.ShaderMaterial({
-                uniforms: {
-                  uTime,
-                  uCol: { value: new THREE.Color(0xff8fd0) },
-                  uDeep: { value: new THREE.Color(0x1a1030) },
-                  uHaze: { value: new THREE.Color(0x3a2658) },
-                  uBg: { value: new THREE.Color(0x05030a) },
-                  uFar: { value: waterR * 0.5 },
-                  uFwd: { value: new THREE.Vector2(0, -1) },
-                },
-                vertexShader: `
+              // ── pagórek ────────────────────────────────────────────────
+              // Drzewo stojące na płaskim zerze wygląda jak wklejone. Kopuła
+              // z siatki 120×120, wysokość liczona funkcją, a nie z tekstury —
+              // ta sama funkcja sadza potem opadłe płatki na zboczu.
+              const mR = fitSize * MOUND_R;
+              const mH = treeHeight * MOUND_H;
+              // Promień „eliptyczny": wyspa jest wydłużona wzdłuż X, więc
+              // odległość liczymy po ściśniętej osi. Ta sama miara idzie do
+              // wysokości, koloru i rozrzutu płatków.
+              const moundT = (x: number, z: number) =>
+                Math.min(Math.hypot(x / MOUND_STRETCH, z) / mR, 1);
+              const moundAt = (x: number, z: number) => {
+                const t = moundT(x, z);
+                // Płaski szczyt: kopuła zaczyna opadać dopiero za MOUND_TOP,
+                // żeby drzewo stało na półce, a nie na czubku
+                const ts = Math.max(t - MOUND_TOP, 0) / (1 - MOUND_TOP);
+                const dome = 0.5 * Math.cos(ts * Math.PI) + 0.5;
+                const bump =
+                  Math.sin(x * 1.7 + z * 0.9) * Math.cos(z * 1.3 - x * 0.6);
+                return mH * (dome + bump * MOUND_BUMP * dome);
+              };
+
+              // Krążek, nie kwadrat: przy kwadratowej siatce widać proste
+              // krawędzie podłoża, choćby kolor gasł do tła. RingGeometry
+              // z wewnętrznym promieniem 0 daje podziały wzdłuż promienia,
+              // których CircleGeometry nie ma (tam środek to jeden wierzchołek).
+              const mGeo = new THREE.RingGeometry(
+                0,
+                mR * 1.35 * MOUND_STRETCH,
+                128,
+                48,
+              );
+              mGeo.rotateX(-Math.PI / 2);
+              const mp = mGeo.attributes.position;
+              const mc = new Float32Array(mp.count * 3);
+              const cTop = new THREE.Color(0x8d4a84); // grzbiet, blisko pnia
+              const cLow = new THREE.Color(0x24162c); // zbocze
+              const tmp = new THREE.Color();
+              for (let i = 0; i < mp.count; i++) {
+                const x = mp.getX(i),
+                  z = mp.getZ(i);
+                const t = moundT(x, z);
+                mp.setY(i, moundAt(x, z));
+                tmp.copy(cLow).lerp(cTop, Math.pow(1 - t, 2.2));
+                // Wygaszanie rozciągnięte na całe zbocze, nie tylko na rant.
+                // Pagórek oglądamy pod ostrym kątem, więc ostatnie procenty
+                // promienia to na ekranie kilka pikseli i krótka rampa czyta
+                // się jako narysowana elipsa.
+                // Odkąd jest woda, rant i tak jest pod powierzchnią — wygaszanie
+                // może być łagodne, inaczej całe zbocze robi się czarną bryłą.
+                const f = Math.min(Math.max((1.0 - t) / 0.5, 0), 1);
+                tmp.multiplyScalar(f * f * (3 - 2 * f));
+                mc[i * 3] = tmp.r;
+                mc[i * 3 + 1] = tmp.g;
+                mc[i * 3 + 2] = tmp.b;
+              }
+              mGeo.setAttribute("color", new THREE.BufferAttribute(mc, 3));
+              mGeo.computeVertexNormals();
+              // Lambert, nie Standard: PBR dokłada 4% odbicia lustrzanego
+              // niezależnie od albedo, więc przy mocnym kluczu całe zbocze
+              // dostawało stałe szare dno ~24/255 i wygaszanie do czerni nic
+              // nie dawało. Lambert liczy samo rozproszenie.
+              const mound = new THREE.Mesh(
+                mGeo,
+                new THREE.MeshLambertMaterial({
+                  vertexColors: true,
+                }),
+              );
+              mound.position.y = -mH * 0.45; // pień wchodzi w zbocze, nie stoi na nim
+              root.add(mound);
+
+              // ── woda ───────────────────────────────────────────────────
+              // Reflector renderuje scenę drugi raz z kamery odbitej względem
+              // tafli. Dlatego trzyma się małej rozdzielczości i dlatego woda
+              // powstaje po drzewie — musi mieć co odbijać.
+              const waterY = mound.position.y + mH * WATER_LEVEL;
+              const waterR = fitSize * 14; // horyzont daleko, żeby nie rysował kreski
+              water = new Reflector(new THREE.PlaneGeometry(waterR, waterR), {
+                textureWidth: WATER_RES,
+                textureHeight: WATER_RES,
+                color: 0xd8cff0, // odbicie jasne – warstwa tafli i tak je tłumi
+              });
+              water.rotation.x = -Math.PI / 2;
+              water.position.y = waterY;
+              root.add(water);
+
+              // ── góry ───────────────────────────────────────────────────
+              // Walec dookoła sceny, oglądany od środka. Tekstura powtarzana
+              // lustrzanie — zwykłe powtórzenie zostawia szew tam, gdzie lewa
+              // i prawa krawędź obrazka się nie zgadzają. Stoi tuż przed
+              // krawędzią wody, gdzie tafla i tak gaśnie do tła, a podstawa
+              // ma w teksturze wpisaną mgłę w kolorze wody.
+              {
+                const mR2 = waterR * 0.5 * 0.96;
+                const mTex = new THREE.TextureLoader().load(
+                  "/scene/mountains.webp",
+                );
+                mTex.colorSpace = THREE.SRGBColorSpace;
+                mTex.wrapS = THREE.MirroredRepeatWrapping;
+                mTex.repeat.x = MOUNTAIN_REPEAT;
+                const mH2 = treeHeight * MOUNTAIN_H;
+                const mountains = new THREE.Mesh(
+                  new THREE.CylinderGeometry(mR2, mR2, mH2, 96, 1, true),
+                  new THREE.MeshBasicMaterial({
+                    map: mTex,
+                    color: 0xd8c4dc, // nowy obrazek jest już w palecie, tylko lekko przygaszony
+                    transparent: true,
+                    side: THREE.BackSide,
+                    depthWrite: false,
+                    fog: false,
+                  }),
+                );
+                mountains.position.y = waterY + mH2 * 0.5 - mH2 * 0.3; // podstawa głęboko pod wodą
+                // oś lustra poza kadrem startowym – inaczej szczyty układają
+                // się symetrycznie po obu stronach drzewa
+                mountains.rotation.y = (Math.PI / MOUNTAIN_REPEAT) * 0.5;
+                mountains.renderOrder = -1; // po gwiazdach, przed wodą
+                root.add(mountains);
+                // Chmury: walec o włos większy, wyżej. Zamiast tekstury —
+                // szum fbm w shaderze. Próbkowany po okręgu w przestrzeni
+                // szumu, więc jest okresowy dookoła bez żadnego szwu, a czas
+                // przesuwa go i powoli zmienia kształt. Obrazek chmur wyglądał
+                // sztucznie: jedna klatka powtórzona cztery razy, twarde
+                // krawędzie po wycinaniu i zero życia.
+                const cH = treeHeight * CLOUD_H;
+                const clouds = new THREE.Mesh(
+                  new THREE.CylinderGeometry(
+                    mR2 * 1.02,
+                    mR2 * 1.02,
+                    cH,
+                    96,
+                    1,
+                    true,
+                  ),
+                  new THREE.ShaderMaterial({
+                    uniforms: {
+                      uTime,
+                      uDark: { value: new THREE.Color(0x1c1230) },
+                      uLight: { value: new THREE.Color(0x7d5aa6) },
+                      uRim: { value: new THREE.Color(0xd9a6e8) },
+                      uCover: { value: CLOUD_COVER },
+                      uSoft: { value: CLOUD_SOFT },
+                      uOpacity: { value: CLOUD_OPACITY },
+                      uDrift: { value: CLOUD_DRIFT },
+                      uEvolve: { value: CLOUD_EVOLVE },
+                      uMoonAz: { value: MOON_AZIMUTH },
+                      uMoonCol: { value: new THREE.Color(MOON_COLOR) },
+                      uMoonVis: { value: 1 },
+                    },
+                    vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                      vUv = uv;
+                      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }`,
+                    fragmentShader: `
+                    uniform float uTime, uCover, uSoft, uOpacity, uDrift, uEvolve, uMoonAz, uMoonVis;
+                    uniform vec3 uDark, uLight, uRim, uMoonCol;
+                    varying vec2 vUv;
+                    float hash(vec3 p) {
+                      p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+                      p *= 17.0;
+                      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+                    }
+                    float noise(vec3 x) {
+                      vec3 i = floor(x), f = fract(x);
+                      f = f * f * (3.0 - 2.0 * f);
+                      return mix(
+                        mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x),
+                            mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+                        mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                            mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+                    }
+                    float fbm(vec3 p) {
+                      float a = 0.5, s = 0.0;
+                      for (int i = 0; i < 5; i++) {
+                        s += a * noise(p);
+                        p = p * 2.03 + vec3(3.1, 1.7, 0.9);
+                        a *= 0.5;
+                      }
+                      return s;
+                    }
+                    void main() {
+                      // okrąg w przestrzeni szumu = brak szwu dookoła walca
+                      float ang = vUv.x * 6.2831853 + uTime * uDrift;
+                      float R = 3.2;
+                      vec3 p = vec3(cos(ang) * R, sin(ang) * R, vUv.y * 2.6 + uTime * uEvolve);
+                      float n = fbm(p) + 0.12 * fbm(p * 3.1 + 7.0) - 0.06;
+                      // chmury żyją w pasie: nic przy samych szczytach gór,
+                      // rzednące ku górze kadru
+                      float band = smoothstep(0.02, 0.28, vUv.y) * (1.0 - smoothstep(0.55, 0.95, vUv.y));
+                      float d = smoothstep(uCover, uCover + uSoft, n) * band;
+                      // cieniowanie: gęstsze partie ciemniejsze, brzegi
+                      // podświetlone – jak od blasku za chmurą
+                      float thick = smoothstep(uCover, uCover + 0.45, n);
+                      float rim = d * (1.0 - thick);
+                      vec3 col = mix(uLight, uDark, thick);
+                      col = mix(col, uRim, rim * 0.55);
+                      // od strony księżyca chmury łapią jego kolor, brzegi
+                      // najmocniej – CylinderGeometry ma u=0 na +Z, tak jak
+                      // nasz azymut, więc kąt czyta się wprost z uv
+                      float lit = pow(max(cos(vUv.x * 6.2831853 - uMoonAz), 0.0), 3.0);
+                      col = mix(col, uMoonCol, lit * (0.35 + 0.65 * rim) * uMoonVis);
+                      gl_FragColor = vec4(col, d * uOpacity);
+                    }`,
+                    transparent: true,
+                    side: THREE.BackSide,
+                    depthWrite: false,
+                  }),
+                );
+                clouds.position.y = waterY + mH2 * 0.35 + cH * 0.5;
+                clouds.renderOrder = -2; // za górami, przed gwiazdami
+                root.add(clouds);
+                cloudMat = clouds.material as THREE.ShaderMaterial;
+
+                // Księżyc: tarcza + poświata, obie zawsze zwrócone do kamery
+                // (ustawiane w pętli). Góry nie piszą głębi, więc kolejność
+                // rysowania robi za zasłanianie: tarcza idzie przed nimi.
+                const moonR = treeHeight * MOON_SIZE * 10 * 0.5;
+                // Tarcza z obrazka (public/scene/moon.webp, z własną alfą i
+                // poświatą przy brzegu); wcześniejsza proceduralna miała plamy
+                // jak z kałuży. Halo pod spodem zostaje, tylko słabsze.
+                const moonTex = new THREE.TextureLoader().load(
+                  "/scene/moon.webp",
+                );
+                moonTex.colorSpace = THREE.SRGBColorSpace;
+                const moonMat = new THREE.MeshBasicMaterial({
+                  map: moonTex,
+                  transparent: true,
+                  depthWrite: false,
+                });
+                const moon = new THREE.Mesh(
+                  new THREE.PlaneGeometry(moonR * 2.5, moonR * 2.5),
+                  moonMat,
+                ); // ×2.5: w obrazku tarcza ma ~80% szerokości
+                const haloMat = new THREE.ShaderMaterial({
+                  uniforms: {
+                    uCol: { value: new THREE.Color(MOON_COLOR) },
+                    uK: { value: MOON_GLOW },
+                  },
+                  vertexShader: `
+                  varying vec2 vUv;
+                  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                  fragmentShader: `
+                  uniform vec3 uCol; uniform float uK;
+                  varying vec2 vUv;
+                  void main() {
+                    float r = length(vUv * 2.0 - 1.0);
+                    float a = exp(-r * 4.2) * uK;
+                    gl_FragColor = vec4(uCol * a, a);
+                  }`,
+                  transparent: true,
+                  depthWrite: false,
+                  blending: THREE.AdditiveBlending,
+                });
+                const halo = new THREE.Mesh(
+                  new THREE.PlaneGeometry(moonR * 7, moonR * 7),
+                  haloMat,
+                );
+                moonDist = mR2 * 1.04;
+                const moonY =
+                  waterY + mH2 * 0.5 + moonR * (2.0 * MOON_ELEV - 1.0);
+                moon.position.set(
+                  Math.sin(MOON_AZIMUTH) * moonDist,
+                  moonY,
+                  Math.cos(MOON_AZIMUTH) * moonDist,
+                );
+                halo.position.copy(moon.position);
+                moonBaseY = moonY;
+                moonRise = moonR * 2 * MOON_RISE;
+                moon.renderOrder = -2.6;
+                halo.renderOrder = -2.5;
+                root.add(moon, halo);
+                moonBillboards = [moon, halo];
+                moonMats.disc = moonMat;
+                moonMats.halo = haloMat;
+
+                // Do odbicia nie wchodzą – z daleka i tak byłyby smugą,
+                // a Reflector nie lubi przezroczystych walców wokół siebie.
+                if (water) {
+                  const pass = water.onBeforeRender;
+                  water.onBeforeRender = (...args) => {
+                    mountains.visible = false;
+                    clouds.visible = false;
+                    // księżyc też: lustrzana tarcza pod horyzontem wygląda jak
+                    // czerwone koło na wodzie; odbicie robi smuga w shaderze tafli
+                    for (const b of moonBillboards) b.visible = false;
+                    pass.apply(water, args);
+                    mountains.visible = true;
+                    clouds.visible = true;
+                    for (const b of moonBillboards) b.visible = true;
+                  };
+                }
+              }
+
+              // Tafla: sam Reflector daje czerń wszędzie tam, gdzie odbija
+              // puste niebo, więc wody nie było widać. Ta warstwa nad nim
+              // maluje ton wody (głębia blisko, mgiełka przy horyzoncie),
+              // różową poświatę pod drzewem i zmarszczki; odbicie prześwituje
+              // przez nią, a przy krawędzi płaszczyzny kolor zlewa się z tłem.
+              const surface = new THREE.Mesh(
+                new THREE.PlaneGeometry(waterR, waterR),
+                new THREE.ShaderMaterial({
+                  uniforms: {
+                    uTime,
+                    uCol: { value: new THREE.Color(0xff6fa8) },
+                    uDeep: { value: new THREE.Color(0x1a0c22) },
+                    uHaze: { value: new THREE.Color(0x4a2450) },
+                    uCam: { value: new THREE.Vector3() },
+                    uMoonDir: {
+                      value: new THREE.Vector2(
+                        Math.sin(MOON_AZIMUTH),
+                        Math.cos(MOON_AZIMUTH),
+                      ),
+                    },
+                    uMoonCol: { value: new THREE.Color(MOON_COLOR) },
+                    uMoonVis: { value: 1 },
+                    uBg: { value: new THREE.Color(0x05030a) },
+                    uFar: { value: waterR * 0.5 },
+                    uFwd: { value: new THREE.Vector2(0, -1) },
+                  },
+                  vertexShader: `
                   varying vec2 vW;
                   void main() {
                     vec4 wp = modelMatrix * vec4(position, 1.0);
                     vW = wp.xz;
                     gl_Position = projectionMatrix * viewMatrix * wp;
                   }`,
-                fragmentShader: `
+                  fragmentShader: `
                   uniform float uTime;
                   uniform vec3 uCol, uDeep, uHaze, uBg;
                   uniform float uFar;
                   uniform vec2 uFwd;
+                  uniform vec3 uCam;
+                  uniform vec2 uMoonDir;
+                  uniform vec3 uMoonCol;
+                  uniform float uMoonVis;
                   varying vec2 vW;
                   void main() {
                     float d = length(vW);
@@ -640,6 +933,16 @@ export default function TreeScene() {
                     vec3 col = tone
                              + uCol * pool * (0.14 + 0.30 * streak)
                              + uHaze * streak * 0.9 * (1.0 - far * 0.6);
+                    // Smuga księżyca: jasna tam, gdzie kierunek od kamery do
+                    // punktu na wodzie pokrywa się z kierunkiem na księżyc.
+                    // Zależna od widza jak prawdziwe odbicie; zmarszczki ją
+                    // rwą na poziome pasma. Reflector jej nie da — tarcza
+                    // stoi za nieprzezroczystą mgiełką przy horyzoncie.
+                    vec2 toP = normalize(vW - uCam.xz);
+                    float along = max(dot(toP, uMoonDir), 0.0);
+                    float lane = pow(along, 60.0);
+                    float glint = lane * (0.35 + 0.65 * streak) * (0.25 + 0.75 * far);
+                    col += uMoonCol * glint * 1.1 * uMoonVis;
                     // blisko odbicie prześwituje, daleko warstwa kryje w całości
                     float alpha = mix(0.6, 1.0, far);
                     // Brzeg płaszczyzny: odkąd horyzont zasłaniają góry,
@@ -648,60 +951,70 @@ export default function TreeScene() {
                     float edge = 1.0 - smoothstep(uFar * 0.97, uFar, d);
                     gl_FragColor = vec4(mix(uBg, col, edge), mix(1.0, alpha, edge));
                   }`,
-                transparent: true,
-                depthWrite: false,
-              })
-            );
-            surface.rotation.x = -Math.PI / 2;
-            surface.position.y = waterY + 0.01;
-            surface.renderOrder = 1;
-            root.add(surface);
-            waterMat = surface.material as THREE.ShaderMaterial;
+                  transparent: true,
+                  depthWrite: false,
+                }),
+              );
+              surface.rotation.x = -Math.PI / 2;
+              surface.position.y = waterY + 0.01;
+              surface.renderOrder = 1;
+              root.add(surface);
+              waterMat = surface.material as THREE.ShaderMaterial;
 
-            // Opadłe płatki: te same karty, tylko płasko i z losowym obrotem
-            // wokół pionu. Gęściej pod koroną niż przy krawędzi — stąd
-            // wykładnik >1 zamiast równomiernego rozrzutu po kole.
-            const fallen = new THREE.InstancedMesh(geo, mat, GROUND_PETALS);
-            for (let i = 0; i < GROUND_PETALS; i++) {
-              const a = Math.random() * Math.PI * 2;
-              const d = Math.pow(Math.random(), 1.35) * mR * 1.25;
-              const x = Math.cos(a) * d * MOUND_STRETCH, z = Math.sin(a) * d;
-              dummy.position.set(x, moundAt(x, z) - mH * 0.45 + 0.02, z);
-              dummy.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.5,
-                                 Math.random() * Math.PI * 2, 0);
-              const sc = size * (0.7 + Math.random() * 0.7);
-              dummy.scale.set(sc, sc, sc);
-              dummy.updateMatrix();
-              fallen.setMatrixAt(i, dummy.matrix);
-              tint.setHSL(0.91 + Math.random() * 0.05, 0.5, 0.34 + Math.random() * 0.16);
-              fallen.setColorAt(i, tint);
-            }
-            fallen.instanceMatrix.needsUpdate = true;
-            if (fallen.instanceColor) fallen.instanceColor.needsUpdate = true;
-            root.add(fallen);
+              // Opadłe płatki: te same karty, tylko płasko i z losowym obrotem
+              // wokół pionu. Gęściej pod koroną niż przy krawędzi — stąd
+              // wykładnik >1 zamiast równomiernego rozrzutu po kole.
+              const fallen = new THREE.InstancedMesh(geo, mat, GROUND_PETALS);
+              for (let i = 0; i < GROUND_PETALS; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const d = Math.pow(Math.random(), 1.35) * mR * 1.25;
+                const x = Math.cos(a) * d * MOUND_STRETCH,
+                  z = Math.sin(a) * d;
+                dummy.position.set(x, moundAt(x, z) - mH * 0.45 + 0.02, z);
+                dummy.rotation.set(
+                  -Math.PI / 2 + (Math.random() - 0.5) * 0.5,
+                  Math.random() * Math.PI * 2,
+                  0,
+                );
+                const sc = size * (0.7 + Math.random() * 0.7);
+                dummy.scale.set(sc, sc, sc);
+                dummy.updateMatrix();
+                fallen.setMatrixAt(i, dummy.matrix);
+                tint.setHSL(
+                  0.91 + Math.random() * 0.05,
+                  0.5,
+                  0.34 + Math.random() * 0.16,
+                );
+                fallen.setColorAt(i, tint);
+              }
+              fallen.instanceMatrix.needsUpdate = true;
+              if (fallen.instanceColor) fallen.instanceColor.needsUpdate = true;
+              root.add(fallen);
 
-            // ── płatki na wodzie ────────────────────────────────────────
-            // Osobny materiał, bo wiatr z korony gaśnie przy ziemi
-            // (smoothstep po wysokości) — te mają własny, powolny dryf
-            // po tafli. Przesunięcie dokładane PO instanceMatrix, w
-            // przestrzeni świata: karty leżą płasko, więc ich lokalne osie
-            // nie pokrywają się ze światem.
-            const floatMat = new THREE.MeshStandardMaterial({
-              map: petalMap,
-              roughness: 0.6,
-              metalness: 0,
-              side: THREE.DoubleSide,
-              alphaTest: 0.5,
-              transparent: false,
-              emissive: new THREE.Color(0xff6fae),
-              emissiveIntensity: 0.08,
-            });
-            floatMat.onBeforeCompile = (shader) => {
-              shader.uniforms.uTime = uTime;
-              shader.uniforms.uDrift = { value: treeHeight * FLOAT_DRIFT };
-              shader.vertexShader =
-                'uniform float uTime;\nuniform float uDrift;\n' +
-                shader.vertexShader.replace('#include <project_vertex>', `
+              // ── płatki na wodzie ────────────────────────────────────────
+              // Osobny materiał, bo wiatr z korony gaśnie przy ziemi
+              // (smoothstep po wysokości) — te mają własny, powolny dryf
+              // po tafli. Przesunięcie dokładane PO instanceMatrix, w
+              // przestrzeni świata: karty leżą płasko, więc ich lokalne osie
+              // nie pokrywają się ze światem.
+              const floatMat = new THREE.MeshStandardMaterial({
+                map: petalMap,
+                roughness: 0.6,
+                metalness: 0,
+                side: THREE.DoubleSide,
+                alphaTest: 0.5,
+                transparent: false,
+                emissive: new THREE.Color(0xff6fae),
+                emissiveIntensity: 0.08,
+              });
+              floatMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = uTime;
+                shader.uniforms.uDrift = { value: treeHeight * FLOAT_DRIFT };
+                shader.vertexShader =
+                  "uniform float uTime;\nuniform float uDrift;\n" +
+                  shader.vertexShader.replace(
+                    "#include <project_vertex>",
+                    `
                   vec4 mvPosition = vec4(transformed, 1.0);
                   #ifdef USE_INSTANCING
                     mvPosition = instanceMatrix * mvPosition;
@@ -713,58 +1026,78 @@ export default function TreeScene() {
                       cos(uTime * 0.28 + ph * 1.3)) * uDrift;
                   #endif
                   mvPosition = modelViewMatrix * mvPosition;
-                  gl_Position = projectionMatrix * mvPosition;`);
-            };
-            const floating = new THREE.InstancedMesh(geo, floatMat, FLOAT_PETALS);
-            const shore = mR * 0.95;
-            for (let i = 0; i < FLOAT_PETALS; i++) {
-              const a = Math.random() * Math.PI * 2;
-              // od brzegu wyspy w głąb wody, gęściej blisko brzegu
-              const d = shore + Math.pow(Math.random(), 1.6) * fitSize * 1.3;
-              dummy.position.set(Math.cos(a) * d, waterY + 0.015, Math.sin(a) * d);
-              dummy.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.12,
-                                 Math.random() * Math.PI * 2, 0);
-              const sc = size * (0.6 + Math.random() * 0.6);
-              dummy.scale.set(sc, sc, sc);
-              dummy.updateMatrix();
-              floating.setMatrixAt(i, dummy.matrix);
-              tint.setHSL(0.91 + Math.random() * 0.05, 0.45, 0.38 + Math.random() * 0.18);
-              floating.setColorAt(i, tint);
+                  gl_Position = projectionMatrix * mvPosition;`,
+                  );
+              };
+              const floating = new THREE.InstancedMesh(
+                geo,
+                floatMat,
+                FLOAT_PETALS,
+              );
+              const shore = mR * 0.95;
+              for (let i = 0; i < FLOAT_PETALS; i++) {
+                const a = Math.random() * Math.PI * 2;
+                // od brzegu wyspy w głąb wody, gęściej blisko brzegu
+                const d = shore + Math.pow(Math.random(), 1.6) * fitSize * 1.3;
+                dummy.position.set(
+                  Math.cos(a) * d,
+                  waterY + 0.015,
+                  Math.sin(a) * d,
+                );
+                dummy.rotation.set(
+                  -Math.PI / 2 + (Math.random() - 0.5) * 0.12,
+                  Math.random() * Math.PI * 2,
+                  0,
+                );
+                const sc = size * (0.6 + Math.random() * 0.6);
+                dummy.scale.set(sc, sc, sc);
+                dummy.updateMatrix();
+                floating.setMatrixAt(i, dummy.matrix);
+                tint.setHSL(
+                  0.91 + Math.random() * 0.05,
+                  0.45,
+                  0.38 + Math.random() * 0.18,
+                );
+                floating.setColorAt(i, tint);
+              }
+              floating.instanceMatrix.needsUpdate = true;
+              if (floating.instanceColor)
+                floating.instanceColor.needsUpdate = true;
+              floating.frustumCulled = false;
+              root.add(floating);
             }
-            floating.instanceMatrix.needsUpdate = true;
-            if (floating.instanceColor) floating.instanceColor.needsUpdate = true;
-            floating.frustumCulled = false;
-            root.add(floating);
           }
-        }
 
-        // Światełka: jeden obiekt Points zamiast setek siatek. Additive
-        // blending daje poświatę bez pełnoekranowego bloomu, który kosztuje
-        // osobny pass renderowany na całym ekranie co klatkę.
-        const pos: number[] = [];
-        const size: number[] = [];
-        for (const [x, y, z] of data.tips) {
-          for (let i = 0; i < 2; i++) {
-            pos.push(
-              x + (Math.random() - 0.5) * 0.35,
-              y + (Math.random() - 0.5) * 0.35,
-              z + (Math.random() - 0.5) * 0.35
-            );
-            size.push(0.18 + Math.random() * 0.5);
+          // Światełka: jeden obiekt Points zamiast setek siatek. Additive
+          // blending daje poświatę bez pełnoekranowego bloomu, który kosztuje
+          // osobny pass renderowany na całym ekranie co klatkę.
+          const pos: number[] = [];
+          const size: number[] = [];
+          for (const [x, y, z] of data.tips) {
+            for (let i = 0; i < 2; i++) {
+              pos.push(
+                x + (Math.random() - 0.5) * 0.35,
+                y + (Math.random() - 0.5) * 0.35,
+                z + (Math.random() - 0.5) * 0.35,
+              );
+              size.push(0.18 + Math.random() * 0.5);
+            }
           }
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        geo.setAttribute('aSize', new THREE.Float32BufferAttribute(size, 1));
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(pos, 3),
+          );
+          geo.setAttribute("aSize", new THREE.Float32BufferAttribute(size, 1));
 
-        const mat = new THREE.ShaderMaterial({
-          uniforms: {
-            uTex: { value: tex },
-            uTime,
-            uWind: { value: 0 },
-            uH: { value: 1 },
-          },
-          vertexShader: `
+          const mat = new THREE.ShaderMaterial({
+            uniforms: {
+              uTex: { value: tex },
+              uTime,
+              uWind: { value: 0 },
+              uH: { value: 1 },
+            },
+            vertexShader: `
             attribute float aSize;
             uniform float uTime;
             uniform float uWind;
@@ -784,53 +1117,64 @@ export default function TreeScene() {
               gl_PointSize = aSize * 300.0 / -mv.z;
               gl_Position = projectionMatrix * mv;
             }`,
-          fragmentShader: `
+            fragmentShader: `
             uniform sampler2D uTex;
             varying float vTwinkle;
             void main() {
               vec4 t = texture2D(uTex, gl_PointCoord);
               gl_FragColor = vec4(t.rgb, t.a * vTwinkle);
             }`,
-          transparent: true,
-          depthWrite: false,
-          depthTest: false,
-          blending: THREE.AdditiveBlending,
-        });
-        mat.uniforms.uWind.value = treeHeight * WIND;
-        mat.uniforms.uH.value = treeHeight;
-        points = new THREE.Points(geo, mat);
-        points.renderOrder = 2;
-        root.add(points);
+            transparent: true,
+            depthWrite: false,
+            depthTest: false,
+            blending: THREE.AdditiveBlending,
+          });
+          mat.uniforms.uWind.value = treeHeight * WIND;
+          mat.uniforms.uH.value = treeHeight;
+          points = new THREE.Points(geo, mat);
+          points.renderOrder = 2;
+          root.add(points);
 
-        // ── gwiazdy ────────────────────────────────────────────────────
-        // Górna półkula daleko za sceną. Poniżej horyzontu zasłania je
-        // tafla (przy horyzoncie kryje w całości), więc nie trzeba ich
-        // wycinać osobno. Migotanie i rozmiar per gwiazda w shaderze.
-        {
-          const R = fitSize * 11;
-          const sp: number[] = [];
-          const ss: number[] = [];
-          const sph: number[] = [];
-          for (let i = 0; i < STARS; i++) {
-            const u = Math.random();
-            const v = Math.random();
-            const theta = u * Math.PI * 2;
-            // cos(phi) równomiernie -> równomiernie po sferze; tylko góra
-            const y = 0.06 + v * 0.94;
-            const r = Math.sqrt(1 - y * y);
-            sp.push(Math.cos(theta) * r * R, y * R, Math.sin(theta) * r * R);
-            // większość drobna, kilka wyraźnych
-            const big = Math.random() < 0.08;
-            ss.push((big ? 2.2 + Math.random() * 2.0 : 0.5 + Math.random() * 1.1) * (R / 26) * STAR_SIZE);
-            sph.push(Math.random() * Math.PI * 2);
-          }
-          const sg = new THREE.BufferGeometry();
-          sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
-          sg.setAttribute('aSize', new THREE.Float32BufferAttribute(ss, 1));
-          sg.setAttribute('aPhase', new THREE.Float32BufferAttribute(sph, 1));
-          const sm = new THREE.ShaderMaterial({
-            uniforms: { uTex: { value: starTex }, uTime, uTw: { value: STAR_TWINKLE } },
-            vertexShader: `
+          // ── gwiazdy ────────────────────────────────────────────────────
+          // Górna półkula daleko za sceną. Poniżej horyzontu zasłania je
+          // tafla (przy horyzoncie kryje w całości), więc nie trzeba ich
+          // wycinać osobno. Migotanie i rozmiar per gwiazda w shaderze.
+          {
+            const R = fitSize * 11;
+            const sp: number[] = [];
+            const ss: number[] = [];
+            const sph: number[] = [];
+            for (let i = 0; i < STARS; i++) {
+              const u = Math.random();
+              const v = Math.random();
+              const theta = u * Math.PI * 2;
+              // cos(phi) równomiernie -> równomiernie po sferze; tylko góra
+              const y = 0.06 + v * 0.94;
+              const r = Math.sqrt(1 - y * y);
+              sp.push(Math.cos(theta) * r * R, y * R, Math.sin(theta) * r * R);
+              // większość drobna, kilka wyraźnych
+              const big = Math.random() < 0.08;
+              ss.push(
+                (big ? 2.2 + Math.random() * 2.0 : 0.5 + Math.random() * 1.1) *
+                  (R / 26) *
+                  STAR_SIZE,
+              );
+              sph.push(Math.random() * Math.PI * 2);
+            }
+            const sg = new THREE.BufferGeometry();
+            sg.setAttribute(
+              "position",
+              new THREE.Float32BufferAttribute(sp, 3),
+            );
+            sg.setAttribute("aSize", new THREE.Float32BufferAttribute(ss, 1));
+            sg.setAttribute("aPhase", new THREE.Float32BufferAttribute(sph, 1));
+            const sm = new THREE.ShaderMaterial({
+              uniforms: {
+                uTex: { value: starTex },
+                uTime,
+                uTw: { value: STAR_TWINKLE },
+              },
+              vertexShader: `
               attribute float aSize;
               attribute float aPhase;
               uniform float uTime;
@@ -847,83 +1191,108 @@ export default function TreeScene() {
                 gl_PointSize = aSize * 300.0 / -mv.z;
                 gl_Position = projectionMatrix * mv;
               }`,
-            fragmentShader: `
+              fragmentShader: `
               uniform sampler2D uTex;
               varying float vTw;
               void main() {
                 vec4 t = texture2D(uTex, gl_PointCoord);
                 gl_FragColor = vec4(t.rgb, t.a * vTw);
               }`,
-            transparent: true,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-          });
-          const stars = new THREE.Points(sg, sm);
-          stars.renderOrder = -2;
-          stars.frustumCulled = false;
-          root.add(stars);
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+            });
+            const stars = new THREE.Points(sg, sm);
+            stars.renderOrder = -3;
+            stars.frustumCulled = false;
+            root.add(stars);
 
-          // Gwiazdy nie wchodzą do odbicia: lustrzana kamera patrzy spod
-          // tafli w górę i łapie te przy horyzoncie, których z góry nie
-          // widać — woda była gęściej usiana gwiazdami niż niebo.
-          if (water) {
-            const pass = water.onBeforeRender;
-            water.onBeforeRender = (...args) => {
-              stars.visible = false;
-              pass.apply(water, args);
-              stars.visible = true;
-            };
+            // Gwiazdy nie wchodzą do odbicia: lustrzana kamera patrzy spod
+            // tafli w górę i łapie te przy horyzoncie, których z góry nie
+            // widać — woda była gęściej usiana gwiazdami niż niebo.
+            if (water) {
+              const pass = water.onBeforeRender;
+              water.onBeforeRender = (...args) => {
+                stars.visible = false;
+                pass.apply(water, args);
+                stars.visible = true;
+              };
+            }
           }
-        }
 
-        // ── motyle ─────────────────────────────────────────────────────
-        // Cała trasa liczona w shaderze z czasu i paru liczb per motyl:
-        // okrąg wokół korony (promień, prędkość, faza) plus falowanie
-        // w pionie. Kierunek lotu to pochodna trasy, skrzydła składają się
-        // wokół osi ciała. Zero pracy na CPU, jeden draw call.
-        {
-          const base = new THREE.PlaneGeometry(1, 1, 2, 1);
-          const fg = new THREE.InstancedBufferGeometry();
-          fg.index = base.index;
-          fg.attributes.position = base.attributes.position;
-          fg.attributes.uv = base.attributes.uv;
-          fg.instanceCount = BUTTERFLIES;
-          const aA: number[] = [], aB: number[] = [], aC: number[] = [];
-          const aS: number[] = [], aCol: number[] = [];
-          const col = new THREE.Color();
-          for (let i = 0; i < BUTTERFLIES; i++) {
-            const dir = Math.random() < 0.5 ? -1 : 1;
-            aA.push(
-              dir * (0.12 + Math.random() * 0.2),        // prędkość kątowa
-              Math.random() * Math.PI * 2,               // faza
-              fitSize * (0.5 + Math.random() * 0.3),     // promień okrążania: na zewnątrz korony
-              treeHeight * (0.05 + Math.random() * 0.08) // amplituda pionowa
+          // ── motyle ─────────────────────────────────────────────────────
+          // Cała trasa liczona w shaderze z czasu i paru liczb per motyl:
+          // okrąg wokół korony (promień, prędkość, faza) plus falowanie
+          // w pionie. Kierunek lotu to pochodna trasy, skrzydła składają się
+          // wokół osi ciała. Zero pracy na CPU, jeden draw call.
+          {
+            const base = new THREE.PlaneGeometry(1, 1, 2, 1);
+            const fg = new THREE.InstancedBufferGeometry();
+            fg.index = base.index;
+            fg.attributes.position = base.attributes.position;
+            fg.attributes.uv = base.attributes.uv;
+            fg.instanceCount = BUTTERFLIES;
+            const aA: number[] = [],
+              aB: number[] = [],
+              aC: number[] = [];
+            const aS: number[] = [],
+              aCol: number[] = [];
+            const col = new THREE.Color();
+            for (let i = 0; i < BUTTERFLIES; i++) {
+              const dir = Math.random() < 0.5 ? -1 : 1;
+              aA.push(
+                dir * (0.12 + Math.random() * 0.2), // prędkość kątowa
+                Math.random() * Math.PI * 2, // faza
+                fitSize * (0.5 + Math.random() * 0.3), // promień okrążania: na zewnątrz korony
+                treeHeight * (0.05 + Math.random() * 0.08), // amplituda pionowa
+              );
+              aB.push(
+                0.5 + Math.random() * 0.9, // tempo falowania
+                Math.random() * Math.PI * 2,
+                9 + Math.random() * 5, // tempo machania
+                Math.random() * Math.PI * 2,
+              );
+              aC.push(
+                (Math.random() - 0.5) * fitSize * 0.25,
+                treeHeight * (0.6 + Math.random() * 0.45),
+                (Math.random() - 0.5) * fitSize * 0.25,
+              );
+              aS.push(
+                treeHeight * BUTTERFLY_SIZE * (0.7 + Math.random() * 0.6),
+              );
+              col.setHSL(
+                Math.random() < 0.5
+                  ? 0.52 + Math.random() * 0.06
+                  : 0.88 + Math.random() * 0.06,
+                0.9,
+                0.7,
+              );
+              aCol.push(col.r, col.g, col.b);
+            }
+            fg.setAttribute(
+              "aA",
+              new THREE.InstancedBufferAttribute(new Float32Array(aA), 4),
             );
-            aB.push(
-              0.5 + Math.random() * 0.9,                 // tempo falowania
-              Math.random() * Math.PI * 2,
-              9 + Math.random() * 5,                     // tempo machania
-              Math.random() * Math.PI * 2
+            fg.setAttribute(
+              "aB",
+              new THREE.InstancedBufferAttribute(new Float32Array(aB), 4),
             );
-            aC.push(
-              (Math.random() - 0.5) * fitSize * 0.25,
-              treeHeight * (0.6 + Math.random() * 0.45),
-              (Math.random() - 0.5) * fitSize * 0.25
+            fg.setAttribute(
+              "aCenter",
+              new THREE.InstancedBufferAttribute(new Float32Array(aC), 3),
             );
-            aS.push(treeHeight * BUTTERFLY_SIZE * (0.7 + Math.random() * 0.6));
-            col.setHSL(Math.random() < 0.5 ? 0.52 + Math.random() * 0.06 : 0.88 + Math.random() * 0.06,
-                       0.9, 0.7);
-            aCol.push(col.r, col.g, col.b);
-          }
-          fg.setAttribute('aA', new THREE.InstancedBufferAttribute(new Float32Array(aA), 4));
-          fg.setAttribute('aB', new THREE.InstancedBufferAttribute(new Float32Array(aB), 4));
-          fg.setAttribute('aCenter', new THREE.InstancedBufferAttribute(new Float32Array(aC), 3));
-          fg.setAttribute('aScale', new THREE.InstancedBufferAttribute(new Float32Array(aS), 1));
-          fg.setAttribute('aColor', new THREE.InstancedBufferAttribute(new Float32Array(aCol), 3));
+            fg.setAttribute(
+              "aScale",
+              new THREE.InstancedBufferAttribute(new Float32Array(aS), 1),
+            );
+            fg.setAttribute(
+              "aColor",
+              new THREE.InstancedBufferAttribute(new Float32Array(aCol), 3),
+            );
 
-          const fm = new THREE.ShaderMaterial({
-            uniforms: { uTex: { value: flyTex }, uTime, uAlpha: uFly },
-            vertexShader: `
+            const fm = new THREE.ShaderMaterial({
+              uniforms: { uTex: { value: flyTex }, uTime, uAlpha: uFly },
+              vertexShader: `
               attribute vec4 aA;
               attribute vec4 aB;
               attribute vec3 aCenter;
@@ -950,7 +1319,7 @@ export default function TreeScene() {
                 vColor = aColor;
                 gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
               }`,
-            fragmentShader: `
+              fragmentShader: `
               uniform sampler2D uTex;
               uniform float uAlpha;
               varying vec2 vUv;
@@ -959,19 +1328,19 @@ export default function TreeScene() {
                 vec4 t = texture2D(uTex, vUv);
                 gl_FragColor = vec4(t.rgb * vColor * 1.4, t.a * uAlpha);
               }`,
-            transparent: true,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-            blending: THREE.AdditiveBlending,
-          });
-          const flies = new THREE.Mesh(fg, fm);
-          flies.frustumCulled = false;
-          flies.renderOrder = 3;
-          root.add(flies);
-        }
-
-      })
-      .catch((e) => console.error('[tree] nie udało się wczytać modelu', e));
+              transparent: true,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+              blending: THREE.AdditiveBlending,
+            });
+            const flies = new THREE.Mesh(fg, fm);
+            flies.frustumCulled = false;
+            flies.renderOrder = 3;
+            root.add(flies);
+          }
+        },
+      )
+      .catch((e) => console.error("[tree] nie udało się wczytać modelu", e));
 
     /** Progress scrolla liczony z pozycji sekcji – bez bibliotek. */
     const scrollProgress = () => {
@@ -983,7 +1352,7 @@ export default function TreeScene() {
 
     let visible = true;
     const io = new IntersectionObserver(([e]) => (visible = e.isIntersecting), {
-      rootMargin: '150px',
+      rootMargin: "150px",
     });
     io.observe(el);
 
@@ -998,29 +1367,69 @@ export default function TreeScene() {
 
       const k = sampleKeys(smooth);
       const r = k.radius * fitSize;
-      camera.position.set(Math.sin(k.angle) * r, k.height * treeHeight, Math.cos(k.angle) * r);
+      camera.position.set(
+        Math.sin(k.angle) * r,
+        k.height * treeHeight,
+        Math.cos(k.angle) * r,
+      );
       camera.lookAt(0, k.look * treeHeight, 0);
 
       // Klucz zawsze po lewej stronie kadru, rim po prawej i zza drzewa.
       // Cel obu lamp zostaje w zerze, więc liczy się sam kierunek.
       fwd.copy(camera.position).negate().normalize();
       right.crossVectors(fwd, UP).normalize();
-      key.position.copy(camera.position)
+      key.position
+        .copy(camera.position)
         .addScaledVector(right, -r * LIGHT_SIDE)
         .addScaledVector(UP, treeHeight * LIGHT_UP);
       uLight.value.copy(key.position).normalize();
       if (waterMat) {
-        (waterMat.uniforms.uFwd.value as THREE.Vector2).set(fwd.x, fwd.z).normalize();
+        (waterMat.uniforms.uFwd.value as THREE.Vector2)
+          .set(fwd.x, fwd.z)
+          .normalize();
+        (waterMat.uniforms.uCam.value as THREE.Vector3).copy(camera.position);
       }
-      rim.position.copy(camera.position)
+      // Księżyc: azymut liczony od kamery, więc przy orbicie zostaje za
+      // drzewem, a offset przesuwa go w kadrze z prawej na lewą. Do tego
+      // wschodzi. Ta sama pozycja idzie do smugi na wodzie i do chmur.
+      {
+        const t = Math.min(smooth / MOON_RISE_SPAN, 1);
+        const e = t * t * (3 - 2 * t);
+        const camAz = Math.atan2(camera.position.x, camera.position.z);
+        const az = camAz + Math.PI + MOON_FROM + (MOON_TO - MOON_FROM) * e;
+        const y = moonBaseY + moonRise * e;
+        const vis =
+          1 -
+          Math.min(Math.max((smooth - MOON_FADE_FROM) / MOON_FADE_SPAN, 0), 1);
+        for (const b of moonBillboards) {
+          b.position.set(Math.sin(az) * moonDist, y, Math.cos(az) * moonDist);
+          b.lookAt(camera.position);
+          b.visible = vis > 0.001;
+        }
+        if (moonMats.disc) moonMats.disc.opacity = vis;
+        if (moonMats.halo) moonMats.halo.uniforms.uK.value = MOON_GLOW * vis;
+        if (waterMat) waterMat.uniforms.uMoonVis.value = vis;
+        if (cloudMat) cloudMat.uniforms.uMoonVis.value = vis;
+        if (waterMat)
+          (waterMat.uniforms.uMoonDir.value as THREE.Vector2).set(
+            Math.sin(az),
+            Math.cos(az),
+          );
+        if (cloudMat) cloudMat.uniforms.uMoonAz.value = az;
+      }
+      rim.position
+        .copy(camera.position)
         .addScaledVector(right, r * LIGHT_SIDE)
         .addScaledVector(fwd, r * 1.4)
         .addScaledVector(UP, treeHeight * 0.3);
       // przesunięcie drzewa w kadrze bez ruszania modelu
       camera.setViewOffset(
-        el.clientWidth, el.clientHeight,
-        -k.shiftX * el.clientWidth * 0.5, 0,
-        el.clientWidth, el.clientHeight
+        el.clientWidth,
+        el.clientHeight,
+        -k.shiftX * el.clientWidth * 0.5,
+        0,
+        el.clientWidth,
+        el.clientHeight,
       );
       camera.updateProjectionMatrix();
 
@@ -1029,7 +1438,7 @@ export default function TreeScene() {
         const t = Math.min(Math.max(smooth / TITLE_OUT, 0), 1);
         const e = t * t * (3 - 2 * t);
         titleEl.style.opacity = String(1 - e);
-        titleEl.style.setProperty('--sink', `${e * 110}%`);
+        titleEl.style.setProperty("--sink", `${e * 110}%`);
       }
       if (copyEl) {
         const t = Math.min(Math.max((smooth - COPY_FROM) / COPY_SPAN, 0), 1);
@@ -1051,13 +1460,13 @@ export default function TreeScene() {
       camera.aspect = el.clientWidth / el.clientHeight;
       camera.updateProjectionMatrix();
     };
-    window.addEventListener('resize', onResize);
+    window.addEventListener("resize", onResize);
 
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
       io.disconnect();
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener("resize", onResize);
       renderer.dispose();
       tex.dispose();
       starTex.dispose();
@@ -1091,8 +1500,8 @@ export default function TreeScene() {
         <div className={s.copy} ref={copyRef}>
           <h2>Lorem ipsum dolor</h2>
           <p>
-            Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad
-            minim veniam, quis nostrud exercitation.
+            Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+            Ut enim ad minim veniam, quis nostrud exercitation.
           </p>
         </div>
       </div>
