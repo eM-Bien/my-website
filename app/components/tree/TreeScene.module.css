@@ -6,7 +6,7 @@
   /* Prawie czerń z ledwie widoczną poświatą za koroną — granatowe tło
      zjadało kontrast różu i cień po prawej stronie drzewa ginął. */
   background:
-    radial-gradient(ellipse at 50% 32%, #10091a 0%, #05030a 55%, #020106 100%);
+    radial-gradient(ellipse at 50% 32%, #050309 0%, #020105 55%, #000000 100%);
 }
 
 .stage {
