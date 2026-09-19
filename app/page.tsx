@@ -6,7 +6,7 @@ export default function Home() {
     <div>
       <main>
         {/* <Hero /> */}
-        <TreeScene />
+        <TreeScene fluid />
       </main>
     </div>
   );

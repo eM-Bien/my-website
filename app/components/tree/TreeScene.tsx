@@ -119,6 +119,151 @@ const TITLE_OUT = 0.10;        // progress, przy którym tytuł jest już schowa
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
+/**
+ * Smuga za kursorem – uproszczona wersja efektu z leoparpeix.com.
+ *
+ * Tam siedzi pełna symulacja Naviera-Stokesa (adwekcja → dywergencja →
+ * iteracje ciśnienia). Tutaj jest flowmap: mysz maluje plamę prędkości
+ * w jedną teksturę, tekstura wygasa co klatkę, a jej wartości przesuwają
+ * UV gotowego kadru. Jeden pass zamiast dwudziestu kilku.
+ *
+ * Czego flowmap NIE ma: wirów i zawijasów. Płyn ma je stąd, że pole
+ * prędkości oddziałuje samo na siebie. Tu smuga tylko płynie i gaśnie.
+ */
+const FLUID = {
+  size: 256,          // rozdzielczość pola przepływu (i tak jest rozmyte – nie musi być duża)
+  dissipation: 0.94,  // ile smugi zostaje z poprzedniej klatki: 0.9 = krótka, 0.98 = leniwa
+  falloff: 0.22,      // promień plamy malowanej przez kursor, w UV
+  // Uwaga na kumulację: pole to flow = flow*dissipation + nowa plama, więc
+  // przy ciągłym ruchu ustala się na ok. 1/(1-dissipation) = 17x tego, co
+  // wstrzykujemy. Pierwsza wersja miała gain 14, czyli realnie ~230x – obraz
+  // wyjeżdżał pół ekranu w bok i nie dało się tego odczytać jako smugi.
+  gain: 2.5,          // ile prędkości myszy wchodzi w pole
+  clamp: 1.2,         // twardy sufit na długość wektora – bez tego pole rośnie bez końca
+  strength: 0.16,     // jak mocno pole przesuwa obraz
+  split: 0.8,         // rozjechanie kanałów RGB na krawędziach smugi
+  ink: 0.5,           // rozjaśnienie wzdłuż smugi (patrz komentarz w COMPOSITE_FRAG)
+};
+
+/** Wspólny vertex shader dla wszystkich passów pełnoekranowych. */
+const QUAD_VERT = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+  }`;
+
+/** Ping-pong: poprzednia klatka razy dissipation + nowa plama pod kursorem. */
+const FLOW_FRAG = `
+  uniform sampler2D tPrev;
+  uniform vec2 uMouse;
+  uniform vec2 uVelocity;
+  uniform float uAspect;
+  uniform float uFalloff;
+  uniform float uDissipation;
+  uniform float uClamp;
+  varying vec2 vUv;
+  void main() {
+    vec2 flow = texture2D(tPrev, vUv).xy * uDissipation;
+    vec2 d = vUv - uMouse;
+    d.x *= uAspect;                                   // bez tego plama jest owalna
+    float blob = smoothstep(uFalloff, 0.0, length(d));
+    flow += uVelocity * blob;
+    // sufit na długość wektora, nie na składowe – clamp per-oś wykrzywiałby
+    // kierunek smugi po skosie
+    float len = length(flow);
+    if (len > uClamp) flow *= uClamp / len;
+    gl_FragColor = vec4(flow, 0.0, 1.0);
+  }`;
+
+/** Kadr sceny próbkowany z UV przesuniętym o pole przepływu. */
+const COMPOSITE_FRAG = `
+  uniform sampler2D tScene;
+  uniform sampler2D tFlow;
+  uniform float uStrength;
+  uniform float uSplit;
+  uniform float uInk;
+  varying vec2 vUv;
+  void main() {
+    vec2 flow = texture2D(tFlow, vUv).xy;
+    vec2 off = flow * uStrength;
+    // kanały rozjeżdżają się tym mocniej, im szybciej szedł kursor –
+    // to daje atramentowy refleks na krawędzi smugi
+    float k = length(flow) * uSplit;
+    float r = texture2D(tScene, vUv + off * (1.0 + k)).r;
+    vec4  g = texture2D(tScene, vUv + off);
+    float b = texture2D(tScene, vUv + off * (1.0 - k)).b;
+    vec3 col = vec3(r, g.g, b);
+
+    // Samo przesuwanie UV jest tu prawie niewidoczne: niebo to gładki gradient
+    // PIONOWY, więc przesunięcie w poziomie nie zmienia ani jednego piksela.
+    // Smuga musi więc także rozjaśniać, nie tylko wyginać.
+    col += vec3(0.34, 0.20, 0.46) * smoothstep(0.0, 1.0, length(flow)) * uInk;
+
+    gl_FragColor = vec4(col, g.a);
+  }`;
+
+/**
+ * Niebo przeniesione z CSS-a do sceny.
+ *
+ * Musi tu być: postprocessing zniekształca wyłącznie to, co jest w WebGL.
+ * Gradient na .section leży POD canvasem, shader go nie widzi – zostałby
+ * nieruchomy, a falowałoby samo drzewo. Liczby 420/100 to wysokość sekcji
+ * i okna z TreeScene.module.css; zmienisz tam – zmień i tutaj.
+ */
+/**
+ * Przystanki nieba. Kolory NIE są tu wpisane – czytamy je ze zmiennych CSS,
+ * żeby paleta miała jedno źródło prawdy w globals.scss. Fallback jest na
+ * wypadek literówki w nazwie zmiennej: lepiej pokazać stary kolor niż czerń.
+ *
+ * Pozycje (`at`) odpowiadają przystankom linear-gradient w
+ * TreeScene.module.css – tego akurat nie da się odczytać z CSS-u sensownie,
+ * więc przy zmianie gradientu trzeba poprawić oba miejsca.
+ */
+const SKY = [
+  { css: '--night', at: 0.0, fallback: '#050414' },
+  { css: '--bg-dark', at: 0.2, fallback: '#0A084A' },
+  { css: '--bg-blue-dark', at: 0.46, fallback: '#06388B' },
+  { css: '--purple-dark', at: 0.68, fallback: '#3E0C66' },
+  { css: '--purple', at: 0.86, fallback: '#642690' },
+  { css: '--pink-purple', at: 1.0, fallback: '#9A5FB7' },
+];
+
+/**
+ * Hex → 0..1, ręcznie. THREE.Color odpada: jego konstruktor przepuszcza
+ * kolor przez ColorManagement i zwraca wartości liniowe, a shader nieba
+ * pisze prosto do targetu w sRGB. Wyszłoby wyraźnie za ciemne.
+ */
+function cssColor(name: string, fallback: string): THREE.Vector3 {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  const m = /^#?([0-9a-f]{6})$/i.exec(raw || fallback);
+  const n = parseInt(m ? m[1] : fallback.slice(1), 16);
+  return new THREE.Vector3(
+    ((n >> 16) & 255) / 255,
+    ((n >> 8) & 255) / 255,
+    (n & 255) / 255
+  );
+}
+
+const SKY_FRAG = `
+  uniform vec3 uSky[6];
+  uniform float uStop[6];
+  uniform float uScroll;
+  uniform float uViewport;   // jaka część gradientu mieści się w oknie
+  varying vec2 vUv;
+  void main() {
+    // Wycinek gradientu widoczny przez sticky stage. Liczony z realnej
+    // wysokości sekcji, więc zmiana 420vh w CSS nie rozjeżdża nieba.
+    float t = uScroll * (1.0 - uViewport) + (1.0 - vUv.y) * uViewport;
+    vec3 c = uSky[0];
+    for (int i = 1; i < 6; i++) {
+      c = mix(c, uSky[i], smoothstep(uStop[i - 1], uStop[i], t));
+    }
+    gl_FragColor = vec4(c, 1.0);
+  }`;
+
 function sampleKeys(p: number) {
   let a = KEYS[0];
   let b = KEYS[KEYS.length - 1];
@@ -233,7 +378,7 @@ function butterflyTexture() {
 }
 
 
-export default function TreeScene() {
+export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const copyRef = useRef<HTMLDivElement | null>(null);
@@ -291,6 +436,125 @@ export default function TreeScene() {
     let smooth = 0;
 
     const tex = glowTexture();
+
+    // ——— smuga za kursorem ———
+    // Jeden quad na wszystkie passy pełnoekranowe: materiał podmieniamy
+    // przed każdym renderem, zamiast trzymać trzy osobne sceny.
+    let sceneRT: THREE.WebGLRenderTarget | null = null;
+    let flowRead: THREE.WebGLRenderTarget | null = null;
+    let flowWrite: THREE.WebGLRenderTarget | null = null;
+    let quad: THREE.Mesh | null = null;
+    let quadScene: THREE.Scene | null = null;
+    let quadCam: THREE.OrthographicCamera | null = null;
+    let skyMat: THREE.ShaderMaterial | null = null;
+    let flowMat: THREE.ShaderMaterial | null = null;
+    let compMat: THREE.ShaderMaterial | null = null;
+
+    const mouse = new THREE.Vector2(0.5, 0.5);
+    const mouseVel = new THREE.Vector2();
+    let hasMouse = false;
+    const onPointerMove = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      const y = 1 - (e.clientY - r.top) / r.height;   // WebGL ma Y do góry
+      if (hasMouse) mouseVel.set(x - mouse.x, y - mouse.y);
+      mouse.set(x, y);
+      hasMouse = true;
+    };
+
+    // Jaka część gradientu sekcji mieści się naraz w oknie. Przy 420vh
+    // sekcji i 100vh okna to 1/4.2 – ale czytamy to z DOM-u, żeby nie
+    // powielać liczb z TreeScene.module.css (a na mobile sekcja ma 320vh).
+    const viewportFraction = () => {
+      const secH = sectionEl.getBoundingClientRect().height;
+      return secH > 0 ? Math.min(window.innerHeight / secH, 1) : 1;
+    };
+
+    if (fluid) {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+
+      // Kadr sceny: zwykłe 8 bitów wystarczy. colorSpace = sRGB, żeby three
+      // zrobiło konwersję już przy renderze do targetu.
+      sceneRT = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        depthBuffer: true,
+      });
+      sceneRT.texture.colorSpace = THREE.SRGBColorSpace;
+
+      // Pole przepływu MUSI być zmiennoprzecinkowe – prędkość bywa ujemna,
+      // a w zwykłym RGBA8 nie ma jak zapisać minusa.
+      const flowOpts = {
+        type: THREE.HalfFloatType,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        wrapS: THREE.ClampToEdgeWrapping,
+        wrapT: THREE.ClampToEdgeWrapping,
+        depthBuffer: false,
+      };
+      flowRead = new THREE.WebGLRenderTarget(FLUID.size, FLUID.size, flowOpts);
+      flowWrite = new THREE.WebGLRenderTarget(FLUID.size, FLUID.size, flowOpts);
+
+      skyMat = new THREE.ShaderMaterial({
+        vertexShader: QUAD_VERT,
+        fragmentShader: SKY_FRAG,
+        uniforms: {
+          uSky: { value: SKY.map((k) => cssColor(k.css, k.fallback)) },
+          uStop: { value: SKY.map((k) => k.at) },
+          uScroll: { value: 0 },
+          uViewport: { value: viewportFraction() },
+        },
+        depthTest: false,
+        depthWrite: false,
+      });
+      flowMat = new THREE.ShaderMaterial({
+        vertexShader: QUAD_VERT,
+        fragmentShader: FLOW_FRAG,
+        uniforms: {
+          tPrev: { value: null },
+          uMouse: { value: mouse },
+          uVelocity: { value: new THREE.Vector2() },
+          uAspect: { value: w / h },
+          uFalloff: { value: FLUID.falloff },
+          uDissipation: { value: FLUID.dissipation },
+          uClamp: { value: FLUID.clamp },
+        },
+        depthTest: false,
+        depthWrite: false,
+      });
+      compMat = new THREE.ShaderMaterial({
+        vertexShader: QUAD_VERT,
+        fragmentShader: COMPOSITE_FRAG,
+        uniforms: {
+          tScene: { value: sceneRT.texture },
+          tFlow: { value: null },
+          uStrength: { value: FLUID.strength },
+          uSplit: { value: FLUID.split },
+          uInk: { value: FLUID.ink },
+        },
+        depthTest: false,
+        depthWrite: false,
+      });
+
+      quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), skyMat);
+      // Vertex shader sam ustawia gl_Position, więc culling po bounding
+      // sphere nie ma tu sensu i mógłby wyciąć quad zupełnie bez powodu.
+      quad.frustumCulled = false;
+      quadScene = new THREE.Scene();
+      quadScene.add(quad);
+
+      // Świeży render target ma nieokreśloną zawartość, a pierwsza klatka
+      // od razu z niego czyta – na części sterowników byłyby śmieci.
+      for (const rt of [flowRead, flowWrite]) {
+        renderer.setRenderTarget(rt);
+        renderer.clear();
+      }
+      renderer.setRenderTarget(null);
+
+      window.addEventListener('pointermove', onPointerMove);
+    }
     const starTex = starTexture();
     const flyTex = butterflyTexture();
     const uFly = { value: 0 };   // widoczność motyli, sterowana scrollem
@@ -1302,7 +1566,39 @@ export default function TreeScene() {
         const f = Math.min(Math.max((smooth - BUTTERFLY_FROM) / 0.12, 0), 1);
         uFly.value = f * f * (3 - 2 * f);
       }
-      renderer.render(scene, camera);
+      if (fluid && sceneRT && flowRead && flowWrite && quad && quadScene && quadCam && skyMat && flowMat && compMat) {
+        // 1. niebo + scena do tekstury
+        skyMat.uniforms.uScroll.value = smooth;
+        renderer.setRenderTarget(sceneRT);
+        renderer.clear();
+        quad.material = skyMat;
+        renderer.render(quadScene, quadCam);
+        renderer.autoClear = false;      // drzewo dorysowuje się NA niebie
+        renderer.render(scene, camera);
+        renderer.autoClear = true;
+
+        // 2. pole przepływu: stara klatka wygasa, kursor dopisuje plamę
+        flowMat.uniforms.tPrev.value = flowRead.texture;
+        (flowMat.uniforms.uVelocity.value as THREE.Vector2)
+          .copy(mouseVel)
+          .multiplyScalar(reduce ? 0 : FLUID.gain);
+        renderer.setRenderTarget(flowWrite);
+        quad.material = flowMat;
+        renderer.render(quadScene, quadCam);
+        [flowRead, flowWrite] = [flowWrite, flowRead];
+
+        // Wytracanie prędkości: bez tego zatrzymany kursor dalej pompuje
+        // w pole ostatnią wartość i smuga nigdy nie przestaje rosnąć.
+        mouseVel.multiplyScalar(0.86);
+
+        // 3. kadr na ekran, z UV przesuniętym o pole
+        compMat.uniforms.tFlow.value = flowRead.texture;
+        renderer.setRenderTarget(null);
+        quad.material = compMat;
+        renderer.render(quadScene, quadCam);
+      } else {
+        renderer.render(scene, camera);
+      }
     };
     raf = requestAnimationFrame(loop);
 
@@ -1310,6 +1606,11 @@ export default function TreeScene() {
       renderer.setSize(el.clientWidth, el.clientHeight);
       camera.aspect = el.clientWidth / el.clientHeight;
       camera.updateProjectionMatrix();
+      // target kadru idzie za oknem; pole przepływu zostaje małe i kwadratowe
+      sceneRT?.setSize(el.clientWidth, el.clientHeight);
+      if (flowMat) flowMat.uniforms.uAspect.value = el.clientWidth / el.clientHeight;
+      // sekcja jest w vh, więc jej wysokość zmienia się razem z oknem
+      if (skyMat) skyMat.uniforms.uViewport.value = viewportFraction();
     };
     window.addEventListener('resize', onResize);
 
@@ -1318,6 +1619,14 @@ export default function TreeScene() {
       cancelAnimationFrame(raf);
       io.disconnect();
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('pointermove', onPointerMove);
+      sceneRT?.dispose();
+      flowRead?.dispose();
+      flowWrite?.dispose();
+      quad?.geometry.dispose();
+      skyMat?.dispose();
+      flowMat?.dispose();
+      compMat?.dispose();
       renderer.dispose();
       tex.dispose();
       starTex.dispose();
@@ -1331,7 +1640,7 @@ export default function TreeScene() {
       });
       el.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [fluid]);
 
   return (
     <section className={s.section} ref={sectionRef}>
