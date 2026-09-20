@@ -1,0 +1,33 @@
+/* Przypięty w prawym górnym rogu, nad canvasem. Drobny, nie ma konkurować
+   ze sceną – to narzędzie, nie element kompozycji. */
+.switch {
+  position: fixed;
+  top: clamp(1rem, 2.5vw, 2rem);
+  right: clamp(1rem, 2.5vw, 2rem);
+  z-index: 10;
+  display: flex;
+  gap: 0.25rem;
+  font-family: var(--font-caption), Arial, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.link {
+  padding: 0.35rem 0.55rem;
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: none;
+  border-radius: 999px;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #fff;
+  }
+
+  /* aria-current zamiast osobnej klasy: stan jest w atrybucie, który i tak
+     musi tam być dla czytników ekranu – jedno źródło prawdy */
+  &[aria-current="page"] {
+    color: var(--bg-dark, #0a084a);
+    background: #fff;
+  }
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
@@ -125,7 +125,6 @@ const TITLE_OUT = 0.10;        // progress, przy którym tytuł jest już schowa
  * scenę drugi raz od spodu, więc odbicie w wodzie wychodzi samo.
  */
 const TITLE = {
-  text: 'portfolio',
   width: 3.1,       // szerokość napisu (× rozmiar drzewa); rośnie z trackingiem, bo inaczej litery maleją
   dist: 0.42,       // jak daleko ZA osią drzewa, w stronę od kamery (× rozmiar drzewa)
   lift: -0.4,       // dolna krawędź względem tafli (× wysokość napisu); ujemne = w wodzie
@@ -514,18 +513,28 @@ function butterflyTexture() {
 }
 
 
-export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
+/**
+ * Teksty nad sceną przychodzą jako children (patrz SceneText.tsx) i lądują
+ * w .stage nad canvasem. Scena nie trzyma do nich refów – zamiast tego co
+ * klatkę ustawia na sekcji zmienne CSS (--cap-N, --copy, --tail + -y),
+ * a teksty je czytają. Dzięki temu treść może się wymienić (zmiana języka)
+ * bez dotykania sceny.
+ */
+export default function TreeScene({
+  fluid = false,
+  title = 'portfolio',
+  children,
+}: {
+  fluid?: boolean;
+  title?: string;
+  children?: ReactNode;
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
-  const copyRef = useRef<HTMLDivElement | null>(null);
-  const captionRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const tailCopyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = hostRef.current;
     const sectionEl = sectionRef.current;
-    const copyEl = copyRef.current;
-    const tailCopyEl = tailCopyRef.current;
     if (!el || !sectionEl) return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1321,7 +1330,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
             // 2D wypaliłby napis tym, co akurat jest pod ręką.
             document.fonts.ready.then(() => {
               if (disposed) return;
-              const { tex, aspect } = titleTexture(TITLE.text);
+              const { tex, aspect } = titleTexture(title);
               titleTex = tex;
               const tw = fitSize * TITLE.width;
               const th = tw / aspect;
@@ -1880,30 +1889,29 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         titleMat.uniforms.uSink.value = Math.max(out, 1 - up);
         titleMat.uniforms.uOpacity.value = 1 - out;
       }
+      // Widoczność tekstów: zmienne CSS na sekcji, czytane przez SceneText.
+      // Jeden zapis atrybutu style na klatkę zamiast refów do każdego bloku.
+      const fadeVar = (name: string, e: number, restPx: number) => {
+        sectionEl.style.setProperty(name, e.toFixed(3));
+        sectionEl.style.setProperty(`${name}-y`, reduce ? '0px' : `${((1 - e) * restPx).toFixed(1)}px`);
+      };
       for (let i = 0; i < CAPTIONS.length; i++) {
-        const node = captionRefs.current[i];
-        if (!node) continue;
         const c = CAPTIONS[i];
         const fadeIn = Math.min(Math.max((main - c.from) / CAPTION_FADE, 0), 1);
         const fadeOut = 1 - Math.min(Math.max((main - (c.to - CAPTION_FADE)) / CAPTION_FADE, 0), 1);
         const a = Math.min(fadeIn, fadeOut);
-        const e = a * a * (3 - 2 * a);
-        node.style.opacity = String(e);
-        node.style.transform = reduce ? '' : `translateY(${(1 - e) * 20}px)`;
+        fadeVar(`--cap-${i}`, a * a * (3 - 2 * a), 20);
       }
-      if (copyEl) {
+      {
         const t = Math.min(Math.max((main - COPY_FROM) / COPY_SPAN, 0), 1);
-        copyEl.style.opacity = String(t * (1 - tail));   // gaśnie, gdy kamera schodzi do wody
-        copyEl.style.transform = `translateY(${(1 - t) * 24}px)`;
+        fadeVar('--copy', t * (1 - tail), 24);   // gaśnie, gdy kamera schodzi do wody
       }
-      if (tailCopyEl) {
+      {
         // Na tailT (liniowym), nie na tail (wygładzonym): okno ma być
         // przewidywalne w scrollu. Start po 30% zjazdu – blok końcowy jest
         // już prawie niewidoczny, kamera w połowie drogi do wody.
         const t = Math.min(Math.max((tailT - 0.3) / 0.4, 0), 1);
-        const e = t * t * (3 - 2 * t);
-        tailCopyEl.style.opacity = String(e);
-        tailCopyEl.style.transform = reduce ? '' : `translateY(${(1 - e) * 24}px)`;
+        fadeVar('--tail', t * t * (3 - 2 * t), 24);
       }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;
@@ -2004,45 +2012,15 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       });
       el.removeChild(renderer.domElement);
     };
-  }, [fluid]);
+  }, [fluid, title]);
 
   return (
     <section className={s.section} ref={sectionRef}>
       <div className={s.stage}>
         <div ref={hostRef} className={s.canvas} />
-        {/* Tytuł widoczny jest obiektem w scenie WebGL (patrz TITLE). Ten h1
-            jest tylko dla czytników ekranu i wyszukiwarek – canvas jest
-            dla nich pusty. */}
-        <h1 className="sr-only">{TITLE.text}</h1>
-        {/* Podpisy przy drzewie – timing w CAPTIONS, kolejność ta sama. */}
-        <div
-          className={`${s.caption} ${s.captionLeft}`}
-          ref={(n) => { captionRefs.current[0] = n; }}
-        >
-          <p>Cześć, jestem Magda. Wygląda na to, że trafiłeś na moje portfolio.</p>
-        </div>
-        <div
-          className={`${s.caption} ${s.captionRight}`}
-          ref={(n) => { captionRefs.current[1] = n; }}
-        >
-          <p>Poznaj mnie i moje projekty. Zainspiruj się — albo zaproś mnie do współpracy.</p>
-        </div>
-        <div className={s.copy} ref={copyRef}>
-          <h2>Lorem ipsum dolor</h2>
-          <p>
-            Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad
-            minim veniam, quis nostrud exercitation.
-          </p>
-        </div>
-        {/* Tekst przy zbliżeniu na płatki. Ten sam styl co .copy – wchodzi w
-            to samo miejsce, gdy tamten gaśnie, więc czyta się jak podmiana. */}
-        <div className={s.copy} ref={tailCopyRef}>
-          <h2>Lorem ipsum dolor</h2>
-          <p>
-            Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et
-            dolore magna aliqua.
-          </p>
-        </div>
+        {/* Teksty (SceneText.tsx) – renderuje je strona, tu tylko lądują
+            nad canvasem. Timing w CAPTIONS / COPY_FROM / ogonie. */}
+        {children}
       </div>
     </section>
   );

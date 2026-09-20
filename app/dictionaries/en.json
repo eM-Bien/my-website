@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "title": "eM-Bien – portfolio",
+    "description": "Magda's portfolio – design and front-end"
+  },
+  "scene": {
+    "title": "portfolio",
+    "captions": [
+      "Hi, I'm Magda. Looks like you've found my portfolio.",
+      "Get to know me and my projects. Find inspiration — or invite me to collaborate."
+    ],
+    "copy": {
+      "heading": "Lorem ipsum dolor",
+      "body": "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."
+    },
+    "tail": {
+      "heading": "Lorem ipsum dolor",
+      "body": "Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+    }
+  }
+}
