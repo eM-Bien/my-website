@@ -109,26 +109,30 @@
   padding-right: 1.5rem;
   pointer-events: none;
   opacity: 0;
-  color: #efe3cf;
-  font-family: var(--font-display), Georgia, serif;
+  color: #fff;
+  font-family: var(--font-caption), Arial, sans-serif;
 }
 
+/* Nagłówek jak podpisy: wersaliki, Black, wiersze na styk. */
 .copy h2 {
-  font-size: clamp(2rem, 1rem + 3vw, 4rem);
-  font-weight: 400;
-  line-height: 1.1;
-  margin: 0 0 1rem;
+  font-size: clamp(1.8rem, 0.6rem + 3vw, 3.8rem);
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  margin: 0 0 1.25rem;
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.5);
 }
 
 .copy p {
   margin: 0;
   max-width: 34ch;
-  /* Cormorant ma cienkie kreski – w domyślnej grubości i rozmiarze akapit
-     na ciemnym tle robi się szary i męczy. Stąd 500 i trochę większy stopień. */
-  font-size: clamp(1.05rem, 0.95rem + 0.4vw, 1.3rem);
+  /* Ten sam krój, ale NIE wersalikami i nie w 900 – kilka zdań Blackiem
+     wielkimi literami to ściana, której nikt nie przeczyta. */
+  font-size: clamp(1rem, 0.9rem + 0.4vw, 1.25rem);
   font-weight: 500;
-  line-height: 1.6;
-  color: rgba(239, 227, 207, 0.72);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.78);
 }
 
 @media (max-width: 900px) {
@@ -139,5 +143,60 @@
     padding-inline: 1.25rem;
     text-align: center;
     align-items: center;
+  }
+}
+
+/* Podpisy przy drzewie – po lewej i po prawej od pnia, na wysokości środka
+   kadru. Opacity i transform ustawia pętla renderująca z tabelki CAPTIONS. */
+.caption {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  /* Ponad połowa kadru: przy 4rem wersalikami słowo WSPÓŁPRACY ma ~30rem
+     i w węższej kolumnie wypadało poza ekran. */
+  width: min(54%, 46rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  color: #fff;
+  /* Ciężki grotesk, wersaliki, ciasna interlinia – plakat, nie akapit. */
+  font-family: var(--font-caption), Arial, sans-serif;
+  text-transform: uppercase;
+}
+
+.captionLeft {
+  left: 0;
+  padding-left: clamp(1.5rem, 6vw, 6rem);
+  padding-right: 1rem;
+}
+
+/* Kolumna po prawej, ale tekst wyrównany do lewej: chorągiewka po prawej
+   stronie czyta się naturalnie, po lewej – rwie wzrok przy każdym wierszu. */
+.captionRight {
+  right: 0;
+  padding-right: clamp(1.5rem, 6vw, 6rem);
+  padding-left: 1rem;
+}
+
+.caption p {
+  margin: 0;
+  /* Sufit obniżony, żeby najdłuższe słowo mieściło się w kolumnie także
+     na ~1200px; szerzej i tak wygląda na duże. */
+  font-size: clamp(1.6rem, 0.6rem + 3vw, 3.8rem);
+  font-weight: 900;
+  line-height: 0.95;         /* wiersze niemal na styk, jak na plakacie */
+  letter-spacing: -0.01em;   /* Black bez ujemnego trackingu wygląda na rozstrzelony */
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.5);   /* czytelność na jasnej koronie */
+}
+
+@media (max-width: 900px) {
+  .caption {
+    inset: auto 0 10vh 0;
+    width: 100%;
+    padding-inline: 1.25rem;
+    text-align: center;
   }
 }

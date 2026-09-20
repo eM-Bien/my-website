@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Cinzel_Decorative, Cormorant_Garamond, Inter } from "next/font/google";
+import { Cinzel_Decorative, Cormorant_Garamond, Inter, Montserrat } from "next/font/google";
 import "./globals.scss";
 
 /**
@@ -18,13 +18,23 @@ const display = Cormorant_Garamond({
 
 /**
  * Cinzel Decorative – rzymskie kapitaliki z ozdobnymi zawijasami, tylko do
- * tytułu w scenie 3D. W akapicie byłby nieczytelny, więc nie idzie na body.
- * Nie ma odmiany 300; 400 to najlżejsza.
+ * tytułu w scenie 3D. Nie ma odmiany 300; 400 to najlżejsza.
  */
 const title = Cinzel_Decorative({
   variable: "--font-title",
   subsets: ["latin", "latin-ext"],
   weight: ["400", "700"],
+});
+
+/**
+ * Montserrat Black – ciężki geometryczny grotesk na podpisy przy drzewie.
+ * Plakatowy kontrast z baśniowym tytułem jest celowy.
+ */
+// Bez listy weight: Montserrat jest fontem zmiennym, więc dostajemy całą oś
+// 100–900 z jednego pliku. Potrzebne, bo blok końcowy ma akapit w 500.
+const caption = Montserrat({
+  variable: "--font-caption",
+  subsets: ["latin", "latin-ext"],
 });
 
 /** Zapasowy bezszeryfowy do drobnego tekstu, gdzie Cormorant się rozmywa. */
@@ -40,7 +50,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${display.variable} ${title.variable} ${body.variable}`}>
+    <html lang="en" className={`${display.variable} ${title.variable} ${caption.variable} ${body.variable}`}>
       <body>{children}</body>
     </html>
   );

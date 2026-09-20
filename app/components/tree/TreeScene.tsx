@@ -202,6 +202,21 @@ function titleTexture(text: string): { tex: THREE.CanvasTexture; aspect: number 
  */
 const TREE_STRETCH = 1.12;
 
+/**
+ * Podpisy przy drzewie, sterowane scrollem. Każdy ma okno [from, to] w
+ * progressie: wjeżdża przez CAPTION_FADE na początku i gaśnie przez
+ * CAPTION_FADE przed końcem. Treść siedzi w JSX (żeby dało się dać markup
+ * i kiedyś tłumaczenie) – tu tylko kiedy i po której stronie.
+ *
+ * Pierwszy zaczyna zaraz po TITLE_OUT (tytuł już pod wodą), ostatni kończy
+ * przed COPY_FROM (blok końcowy po przekadrowaniu).
+ */
+const CAPTION_FADE = 0.05;
+const CAPTIONS = [
+  { from: 0.12, to: 0.36 },   // lewa: powitanie
+  { from: 0.40, to: 0.64 },   // prawa: zaproszenie
+];
+
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
@@ -468,6 +483,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const copyRef = useRef<HTMLDivElement | null>(null);
+  const captionRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     const el = hostRef.current;
@@ -1736,6 +1752,17 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         titleMat.uniforms.uSink.value = Math.max(out, 1 - up);
         titleMat.uniforms.uOpacity.value = 1 - out;
       }
+      for (let i = 0; i < CAPTIONS.length; i++) {
+        const node = captionRefs.current[i];
+        if (!node) continue;
+        const c = CAPTIONS[i];
+        const fadeIn = Math.min(Math.max((smooth - c.from) / CAPTION_FADE, 0), 1);
+        const fadeOut = 1 - Math.min(Math.max((smooth - (c.to - CAPTION_FADE)) / CAPTION_FADE, 0), 1);
+        const a = Math.min(fadeIn, fadeOut);
+        const e = a * a * (3 - 2 * a);
+        node.style.opacity = String(e);
+        node.style.transform = reduce ? '' : `translateY(${(1 - e) * 20}px)`;
+      }
       if (copyEl) {
         const t = Math.min(Math.max((smooth - COPY_FROM) / COPY_SPAN, 0), 1);
         copyEl.style.opacity = String(t);
@@ -1850,6 +1877,19 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
             jest tylko dla czytników ekranu i wyszukiwarek – canvas jest
             dla nich pusty. */}
         <h1 className="sr-only">{TITLE.text}</h1>
+        {/* Podpisy przy drzewie – timing w CAPTIONS, kolejność ta sama. */}
+        <div
+          className={`${s.caption} ${s.captionLeft}`}
+          ref={(n) => { captionRefs.current[0] = n; }}
+        >
+          <p>Cześć, jestem Magda. Wygląda na to, że trafiłeś na moje portfolio.</p>
+        </div>
+        <div
+          className={`${s.caption} ${s.captionRight}`}
+          ref={(n) => { captionRefs.current[1] = n; }}
+        >
+          <p>Poznaj mnie i moje projekty. Zainspiruj się — albo zaproś mnie do współpracy.</p>
+        </div>
         <div className={s.copy} ref={copyRef}>
           <h2>Lorem ipsum dolor</h2>
           <p>
