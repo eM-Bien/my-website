@@ -20,7 +20,9 @@
 }
 
 body {
-  font-family: "Inter", sans-serif;
+  // Georgia jako zapas: gdyby Cormorant nie doszedł, chcemy zostać przy
+  // szeryfie, a nie spaść na bezszeryfowy systemowy i zgubić cały ton.
+  font-family: var(--font-display), Georgia, "Times New Roman", serif;
   background:
   radial-gradient(circle at 50% 15%, #1D66BD 0%, transparent 35%),
   linear-gradient(
@@ -31,4 +33,18 @@ body {
     #0A084A 100%
   );
   color: var(--text);
+}
+// Tekst tylko dla czytników ekranu: wizualnie zerowy, ale w drzewie
+// dostępności obecny. Standardowy wzorzec, nie display:none – ten by go ukrył
+// również przed czytnikami.
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

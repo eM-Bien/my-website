@@ -32,22 +32,29 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: 66vh;
+  /* Wyżej = napis wchodzi w pień. Niżej niż ~50vh nie schodź: górna krawędź
+     .titleClip udaje linię wody i musi zostać pod horyzontem sceny. */
+  top: 54vh;
   z-index: 2;
   text-align: center;
   pointer-events: none;
   color: #f4e6ff;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-display), Georgia, serif;
   --sink: 0%;
 }
 
 .title h1 {
   margin: 0;
-  font-size: clamp(2.6rem, 2rem + 4vw, 6rem);
+  /* Skala napędzana głównie przez vw, żeby napis trzymał tę samą proporcję
+     do drzewa na każdym ekranie. Sufit 11rem chroni przed absurdem na 4K. */
+  font-size: clamp(3rem, 0.5rem + 11vw, 11rem);
   font-weight: 300;
-  letter-spacing: 0.18em;
+  /* Przy tym stopniu 0.18em rozjeżdżało napis poza kadr – w dużych
+     rozmiarach światło międzyliterowe i tak wygląda na większe. */
+  letter-spacing: 0.1em;
   line-height: 1;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .titleClip {
@@ -103,7 +110,7 @@
   pointer-events: none;
   opacity: 0;
   color: #efe3cf;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-display), Georgia, serif;
 }
 
 .copy h2 {
@@ -116,6 +123,10 @@
 .copy p {
   margin: 0;
   max-width: 34ch;
+  /* Cormorant ma cienkie kreski – w domyślnej grubości i rozmiarze akapit
+     na ciemnym tle robi się szary i męczy. Stąd 500 i trochę większy stopień. */
+  font-size: clamp(1.05rem, 0.95rem + 0.4vw, 1.3rem);
+  font-weight: 500;
   line-height: 1.6;
   color: rgba(239, 227, 207, 0.72);
 }

@@ -116,6 +116,83 @@ const MOUND_BUMP = 0.34;    // ile nierówności (0 = gładka kopuła)
 // Tytuł wyłaniający się z wody na starcie; znika przy pierwszym scrollu.
 const TITLE_OUT = 0.10;        // progress, przy którym tytuł jest już schowany
 
+/**
+ * Tytuł jako obiekt w scenie, nie element DOM.
+ *
+ * Tylko tak pień może go naprawdę zasłonić: napis stoi za drzewem, nad taflą,
+ * a bufor głębokości robi resztę – z korą, gałęziami i płatkami. DOM leżał
+ * nad canvasem i żadna maska nie oddawała sylwetki. Bonus: Reflector renderuje
+ * scenę drugi raz od spodu, więc odbicie w wodzie wychodzi samo.
+ */
+const TITLE = {
+  text: 'portfolio',
+  width: 3.1,       // szerokość napisu (× rozmiar drzewa); rośnie z trackingiem, bo inaczej litery maleją
+  dist: 0.42,       // jak daleko ZA osią drzewa, w stronę od kamery (× rozmiar drzewa)
+  lift: -0.4,       // dolna krawędź względem tafli (× wysokość napisu); ujemne = w wodzie
+  rise: 2200,       // ms wynurzania na starcie
+  color: '#ffffff',
+  glow: 'rgba(255, 255, 255, 0.45)',
+  font: '--font-title',   // zmienna CSS z layout.tsx; zapas: --font-display
+  weight: 400,
+  tracking: 0.18,   // światło międzyliterowe w em
+};
+
+/**
+ * Warstwy kamery dla trybu fluid. Napis nie może przejść przez postprocessing
+ * (smuga by go rozmazała), więc rysujemy go osobno, NA gotowym kadrze – ale
+ * wtedy pień musi go zasłaniać na nowo, bo bufor głębokości kadru już nie
+ * istnieje. Stąd osobny, tani przebieg samych zasłaniaczy do głębi.
+ */
+const LAYER_OCCLUDER = 1;   // pień, gałęzie, pagórek: tylko głębia, bez koloru
+const LAYER_TITLE = 2;      // napis: rysowany po composite
+
+/**
+ * Napis wypalony na canvasie 2D. Font bierzemy ze zmiennej CSS, bo next/font
+ * nadaje mu zahaszowaną nazwę rodziny – "Cormorant Garamond" w ctx.font
+ * trafiłoby w pustkę i dostalibyśmy Georgię.
+ */
+function titleTexture(text: string): { tex: THREE.CanvasTexture; aspect: number } {
+  const PX = 256;
+  const css = getComputedStyle(document.documentElement);
+  const family =
+    css.getPropertyValue(TITLE.font).trim() ||
+    css.getPropertyValue('--font-display').trim() ||
+    'Georgia, serif';
+  const font = `${TITLE.weight} ${PX}px ${family}`;
+  const upper = text.toUpperCase();
+
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d') as CanvasRenderingContext2D & { letterSpacing?: string };
+  const setFont = () => {
+    ctx.font = font;
+    // starsze Firefoksy nie znają letterSpacing – wtedy po prostu bez trackingu
+    ctx.letterSpacing = `${PX * TITLE.tracking}px`;
+  };
+
+  setFont();
+  const w = Math.ceil(ctx.measureText(upper).width + PX * 0.8);
+  const h = Math.ceil(PX * 1.5);
+  c.width = w;
+  c.height = h;
+  setFont();   // zmiana rozmiaru canvasu zeruje cały stan kontekstu
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = TITLE.glow;
+  ctx.shadowBlur = PX * 0.3;
+  ctx.fillStyle = TITLE.color;
+  // letterSpacing dokłada odstęp także ZA ostatnią literą, więc textAlign
+  // center wyśrodkowuje napis razem z tym pustym ogonem – kompensujemy.
+  const cx = w / 2 + (PX * TITLE.tracking) / 2;
+  ctx.fillText(upper, cx, h / 2);
+  ctx.fillText(upper, cx, h / 2);   // drugi raz – poświata się dokłada
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;   // napis stoi pod kątem do kamery, bez tego się rozmywa
+  return { tex, aspect: w / h };
+}
+
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
@@ -382,13 +459,11 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const copyRef = useRef<HTMLDivElement | null>(null);
-  const titleRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = hostRef.current;
     const sectionEl = sectionRef.current;
     const copyEl = copyRef.current;
-    const titleEl = titleRef.current;
     if (!el || !sectionEl) return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -420,6 +495,9 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
     let treeHeight = 10;
     let fitSize = 10;   // większy z wymiarów: szerokość vs wysokość
     let points: THREE.Points | null = null;
+    let titleMesh: THREE.Mesh | null = null;
+    let titleMat: THREE.ShaderMaterial | null = null;
+    let titleTex: THREE.Texture | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
     let water: Reflector | null = null;
     let moonBillboards: THREE.Object3D[] = [];
@@ -449,6 +527,9 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
     let skyMat: THREE.ShaderMaterial | null = null;
     let flowMat: THREE.ShaderMaterial | null = null;
     let compMat: THREE.ShaderMaterial | null = null;
+
+    // Tylko głębia: kolor nie zapisuje się, więc kadr pod spodem zostaje.
+    const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false });
 
     const mouse = new THREE.Vector2(0.5, 0.5);
     const mouseVel = new THREE.Vector2();
@@ -693,6 +774,13 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
           });
 
           for (const m of hide) m.visible = false;
+          // Do przebiegu głębi pod napisem. Płatki z modelu i tak są ukryte;
+          // własne płatki (InstancedMesh) tu nie trafiają – z materiałem
+          // zastępczym straciłyby alphaTest i zasłaniałyby jako pełne karty.
+          gltf.scene.traverse((o: THREE.Object3D) => {
+            const m = o as THREE.Mesh;
+            if (m.isMesh && !hide.includes(m)) m.layers.enable(LAYER_OCCLUDER);
+          });
 
           const n = spots.length / 3;
           if (n > 0) {
@@ -863,6 +951,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
               vertexColors: true,
             }));
             mound.position.y = -mH * 0.45;   // pień wchodzi w zbocze, nie stoi na nim
+            mound.layers.enable(LAYER_OCCLUDER);
             root.add(mound);
 
             // ── woda ───────────────────────────────────────────────────
@@ -1150,8 +1239,75 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
             surface.rotation.x = -Math.PI / 2;
             surface.position.y = waterY + 0.01;
             surface.renderOrder = 1;
+            // Do przebiegu głębi pod napisem. Bierzemy tę płaszczyznę, nie
+            // Reflector: on w onBeforeRender renderuje całe odbicie i drugi
+            // przebieg podwoiłby najdroższy element sceny. Ta jest tylko
+            // płaskim quadem, a głębię daje identyczną.
+            surface.layers.enable(LAYER_OCCLUDER);
             root.add(surface);
             waterMat = surface.material as THREE.ShaderMaterial;
+
+            // ── tytuł ──────────────────────────────────────────────────
+            // Czekamy na font: Cormorant dochodzi asynchronicznie, a canvas
+            // 2D wypaliłby napis tym, co akurat jest pod ręką.
+            document.fonts.ready.then(() => {
+              if (disposed) return;
+              const { tex, aspect } = titleTexture(TITLE.text);
+              titleTex = tex;
+              const tw = fitSize * TITLE.width;
+              const th = tw / aspect;
+              titleMat = new THREE.ShaderMaterial({
+                uniforms: {
+                  uMap: { value: tex },
+                  uSink: { value: 1 },
+                  uOpacity: { value: 1 },
+                },
+                vertexShader: `
+                  varying vec2 vUv;
+                  void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                  }`,
+                fragmentShader: `
+                  uniform sampler2D uMap;
+                  uniform float uSink;
+                  uniform float uOpacity;
+                  varying vec2 vUv;
+                  void main() {
+                    // uSink zsuwa napis w dół względem płaszczyzny. Jej dolna
+                    // krawędź leży na tafli, więc co zejdzie poniżej – tonie.
+                    vec2 uv = vUv + vec2(0.0, uSink);
+                    if (uv.y > 1.0) discard;
+                    vec4 t = texture2D(uMap, uv);
+                    gl_FragColor = vec4(t.rgb, t.a * uOpacity);
+                  }`,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,   // Reflector patrzy od spodu
+              });
+              titleMesh = new THREE.Mesh(new THREE.PlaneGeometry(tw, th), titleMat);
+              titleMesh.position.y = waterY + th * (0.5 + TITLE.lift);
+              titleMesh.renderOrder = 1;
+              // Warstwa 0 zostaje: kamera Reflectora widzi tylko ją i tylko tak
+              // napis trafi do odbicia. Warstwa TITLE – do osobnego przebiegu.
+              titleMesh.layers.enable(LAYER_TITLE);
+              root.add(titleMesh);
+
+              // W trybie fluid napis jest niewidoczny podczas renderu kadru,
+              // żeby nie przeszedł przez smugę – ale w odbiciu ma być. Reflector
+              // renderuje scenę w swoim onBeforeRender, więc na ten moment go
+              // odsłaniamy. Lista obiektów zewnętrznego renderu jest już
+              // zbudowana, więc zewnętrzny kadr go nie złapie.
+              if (fluid && water) {
+                titleMesh.visible = false;
+                const pass = water.onBeforeRender;
+                water.onBeforeRender = (...args) => {
+                  if (titleMesh) titleMesh.visible = true;
+                  pass.apply(water, args);
+                  if (titleMesh) titleMesh.visible = false;
+                };
+              }
+            });
 
             // Opadłe płatki: te same karty, tylko płasko i z losowym obrotem
             // wokół pionu. Gęściej pod koroną niż przy krawędzi — stąd
@@ -1548,12 +1704,24 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       );
       camera.updateProjectionMatrix();
 
-      if (titleEl) {
-        // tytuł schodzi z powrotem w wodę, gdy zaczyna się orbita
+      if (titleMesh && titleMat) {
+        // Zawsze po przeciwnej stronie drzewa niż kamera i obrócony do niej
+        // samym yaw – pion zostaje, żeby napis stał na horyzoncie, a nie
+        // kładł się razem z pochyleniem kamery.
+        const cx = camera.position.x;
+        const cz = camera.position.z;
+        const cd = Math.hypot(cx, cz) || 1;
+        titleMesh.position.x = (-cx / cd) * TITLE.dist * fitSize;
+        titleMesh.position.z = (-cz / cd) * TITLE.dist * fitSize;
+        titleMesh.rotation.y = Math.atan2(cx, cz);
+
+        // wynurzanie na starcie, potem zatapianie, gdy rusza orbita
         const t = Math.min(Math.max(smooth / TITLE_OUT, 0), 1);
-        const e = t * t * (3 - 2 * t);
-        titleEl.style.opacity = String(1 - e);
-        titleEl.style.setProperty('--sink', `${e * 110}%`);
+        const out = t * t * (3 - 2 * t);
+        const intro = reduce ? 1 : Math.min((now - t0) / TITLE.rise, 1);
+        const up = 1 - Math.pow(1 - intro, 3);
+        titleMat.uniforms.uSink.value = Math.max(out, 1 - up);
+        titleMat.uniforms.uOpacity.value = 1 - out;
       }
       if (copyEl) {
         const t = Math.min(Math.max((smooth - COPY_FROM) / COPY_SPAN, 0), 1);
@@ -1596,6 +1764,24 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         renderer.setRenderTarget(null);
         quad.material = compMat;
         renderer.render(quadScene, quadCam);
+
+        // 4. napis na wierzchu, bez smugi. Najpierw sami zasłaniacze do
+        //    głębi (bez koloru), potem napis z testem głębi – pień go
+        //    przecina tak samo, jak przecinałby w scenie.
+        if (titleMesh) {
+          renderer.autoClear = false;
+          renderer.clearDepth();
+          camera.layers.set(LAYER_OCCLUDER);
+          scene.overrideMaterial = depthOnlyMat;
+          renderer.render(scene, camera);
+          scene.overrideMaterial = null;
+          camera.layers.set(LAYER_TITLE);
+          titleMesh.visible = true;
+          renderer.render(scene, camera);
+          titleMesh.visible = false;
+          camera.layers.set(0);
+          renderer.autoClear = true;
+        }
       } else {
         renderer.render(scene, camera);
       }
@@ -1610,8 +1796,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       sceneRT?.setSize(el.clientWidth, el.clientHeight);
       if (flowMat) flowMat.uniforms.uAspect.value = el.clientWidth / el.clientHeight;
       // sekcja jest w vh, więc jej wysokość zmienia się razem z oknem
-      if (skyMat) skyMat.uniforms.uViewport.value = viewportFraction();
-    };
+      if (skyMat) skyMat.uniforms.uViewport.value = viewportFraction();    };
     window.addEventListener('resize', onResize);
 
     return () => {
@@ -1629,6 +1814,8 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       compMat?.dispose();
       renderer.dispose();
       tex.dispose();
+      titleTex?.dispose();
+      depthOnlyMat.dispose();
       starTex.dispose();
       flyTex.dispose();
       scene.traverse((o: THREE.Object3D) => {
@@ -1646,17 +1833,10 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
     <section className={s.section} ref={sectionRef}>
       <div className={s.stage}>
         <div ref={hostRef} className={s.canvas} />
-        {/* Tytuł: tekst wjeżdża z dołu przez okno z overflow:hidden, którego
-            górna krawędź gra linię wody. Pod nim lustrzana kopia z maską —
-            odbicie na tafli. */}
-        <div className={s.title} ref={titleRef} aria-hidden="true">
-          <div className={s.titleClip}>
-            <h1>Lorem ipsum</h1>
-          </div>
-          <div className={s.titleMirror}>
-            <h1>Lorem ipsum</h1>
-          </div>
-        </div>
+        {/* Tytuł widoczny jest obiektem w scenie WebGL (patrz TITLE). Ten h1
+            jest tylko dla czytników ekranu i wyszukiwarek – canvas jest
+            dla nich pusty. */}
+        <h1 className="sr-only">{TITLE.text}</h1>
         <div className={s.copy} ref={copyRef}>
           <h2>Lorem ipsum dolor</h2>
           <p>
