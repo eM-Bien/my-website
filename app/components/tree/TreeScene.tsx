@@ -217,6 +217,41 @@ const CAPTIONS = [
   { from: 0.40, to: 0.64 },   // prawa: zaproszenie
 ];
 
+/**
+ * Ogon toru: po przekadrowaniu kamera schodzi do tafli na zbliżenie płatka.
+ *
+ * TAIL to ułamek CAŁEGO scrolla sekcji zarezerwowany na ten zjazd. Reszta osi
+ * czasu – KEYS, tytuł, podpisy, blok końcowy, księżyc, motyle – dostaje
+ * progress przeskalowany tak, że kończy się na 1 dokładnie tam, gdzie zaczyna
+ * się ogon. Dzięki temu żadnej z tamtych liczb nie trzeba było ruszać, a
+ * sekcja urosła o tyle samo (420vh → 540vh), więc tempo scrolla jest to samo.
+ */
+const TAIL = 0.22;
+const HERO_PETAL = {
+  azimuth: Math.PI * 0.25,  // kąt na tafli; ten sam, z którego patrzy ostatni klucz
+  offshore: 0.45,           // odległość od brzegu wyspy (× rozmiar drzewa)
+  size: 2.2,                // × rozmiar zwykłego płatka
+  tilt: 0.6,                // uniesienie płatka ku kamerze, w radianach od pionu
+  camDist: 2.4,             // odległość kamery od płatka (× jego rozmiar)
+  camHeight: 0.55,          // wysokość kamery nad taflą (× rozmiar płatka)
+  swing: 0.5,               // kamera odchylona od linii płatek–drzewo, w radianach
+  shiftX: 0.55,             // płatek w kadrze: 0 = środek, 1 = przy prawej krawędzi
+  bob: 0.12,                // amplituda kołysania (× rozmiar płatka)
+  /**
+   * Grupa. Pierwszy to ten, na który patrzy kamera. Przesunięcia w rozmiarach
+   * głównego płatka: dx w bok (+ = w prawo patrząc od drzewa), dz od drzewa
+   * (+ = bliżej kamery). phase rozjeżdża kołysanie, żeby nie falowały chórem.
+   */
+  group: [
+    { dx: 0.0,  dz: 0.0,  size: 1.0,  tilt: 1.0,  phase: 0.0 },
+    // Oba w lewo od głównego: on siedzi przy prawej krawędzi przez shiftX,
+    // więc dodatnie dx wypada poza kadr. Różne dz = różne odległości od
+    // kamery, żeby nie stały w jednym rzędzie.
+    { dx: -1.5, dz: -0.7, size: 0.75, tilt: 0.8,  phase: 2.1 },
+    { dx: -2.6, dz: 0.4,  size: 0.6,  tilt: 1.15, phase: 4.0 },
+  ],
+};
+
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
@@ -525,6 +560,10 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
     let titleTex: THREE.Texture | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
     let water: Reflector | null = null;
+    const heroPetals: { mesh: THREE.Mesh; cfg: (typeof HERO_PETAL.group)[number] }[] = [];
+    const heroAnchor = new THREE.Vector3();   // punkt na tafli, wokół którego leży grupa
+    let heroSize = 0;
+    let heroWaterY = 0;
     let moonBillboards: THREE.Object3D[] = [];
     let moonBaseY = 0;
     let moonRise = 0;
@@ -1414,6 +1453,32 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
             if (floating.instanceColor) floating.instanceColor.needsUpdate = true;
             floating.frustumCulled = false;
             root.add(floating);
+
+            // ── płatki do zbliżenia ─────────────────────────────────────
+            // Osobne siatki, nie instancje: tamte dryfują w vertex shaderze
+            // i CPU nie zna ich pozycji, a kamera musi wiedzieć, na co patrzy.
+            // Kołysanie i orientację liczy pętla, z tego samego powodu.
+            {
+              heroSize = size * HERO_PETAL.size;
+              heroWaterY = waterY;
+              const d = shore + fitSize * HERO_PETAL.offshore;
+              heroAnchor.set(Math.cos(HERO_PETAL.azimuth) * d, 0, Math.sin(HERO_PETAL.azimuth) * d);
+              const heroMat = new THREE.MeshStandardMaterial({
+                map: petalMap,
+                roughness: 0.6,
+                metalness: 0,
+                side: THREE.DoubleSide,
+                alphaTest: 0.5,
+                emissive: new THREE.Color(0xff6fae),
+                emissiveIntensity: 0.3,   // ma się odcinać od tafli, nie w niej ginąć
+              });
+              for (const cfg of HERO_PETAL.group) {
+                const mesh = new THREE.Mesh(geo, heroMat);
+                mesh.scale.setScalar(heroSize * cfg.size);
+                root.add(mesh);
+                heroPetals.push({ mesh, cfg });
+              }
+            }
           }
         }
 
@@ -1668,6 +1733,14 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
     io.observe(el);
 
     const t0 = performance.now();
+    const heroCam = new THREE.Vector3();
+    const lookAtV = new THREE.Vector3();
+    const outV = new THREE.Vector3();
+    const heroRight = new THREE.Vector3();
+    const heroNormal = new THREE.Vector3();
+    const heroTarget = new THREE.Vector3();
+    const camDir = new THREE.Vector3();
+    const levelV = new THREE.Vector3();
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       if (!visible) return;
@@ -1676,10 +1749,63 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       const target = scrollProgress();
       smooth += (target - smooth) * (reduce ? 1 : 0.12);
 
-      const k = sampleKeys(smooth);
+      // Oś czasu części głównej (0..1 do końca przekadrowania) i ogon.
+      const main = Math.min(smooth / (1 - TAIL), 1);
+      const tailT = Math.min(Math.max((smooth - (1 - TAIL)) / TAIL, 0), 1);
+      const tail = tailT * tailT * (3 - 2 * tailT);
+
+      const k = sampleKeys(main);
       const r = k.radius * fitSize;
       camera.position.set(Math.sin(k.angle) * r, k.height * treeHeight, Math.cos(k.angle) * r);
-      camera.lookAt(0, k.look * treeHeight, 0);
+      lookAtV.set(0, k.look * treeHeight, 0);
+
+      if (heroPetals.length) {
+        const ts = reduce ? 0 : (now - t0) / 1000;
+        outV.set(heroAnchor.x, 0, heroAnchor.z).normalize();   // od drzewa na zewnątrz
+        heroRight.crossVectors(UP, outV).normalize();           // w bok, poziomo
+
+        for (const { mesh, cfg } of heroPetals) {
+          const sz = heroSize * cfg.size;
+          const p = mesh.position;
+
+          // Uniesiony ku kamerze. Leżąc płasko byłby przy poziomej kamerze
+          // cienką kreską – widać by było krawędź, nie powierzchnię.
+          const tiltNow = HERO_PETAL.tilt * cfg.tilt + Math.sin(ts * 0.9 + cfg.phase) * 0.06;
+          heroNormal.copy(UP).multiplyScalar(Math.cos(tiltNow)).addScaledVector(outV, Math.sin(tiltNow));
+
+          // Obrót jest wokół środka, więc dolna krawędź schodzi o pół rozmiaru
+          // × sin(tilt) poniżej środka – środek musi być o tyle wyżej. 0.55
+          // zamiast 0.5 to zapas na rogi (rotateZ). Kołysanie 0..bob, nie ±bob.
+          const dip = 0.55 * sz * Math.sin(tiltNow);
+          const bob = HERO_PETAL.bob * sz * (0.5 + 0.5 * Math.sin(ts * 1.1 + cfg.phase));
+          p.copy(heroAnchor)
+            .addScaledVector(heroRight, cfg.dx * heroSize)
+            .addScaledVector(outV, cfg.dz * heroSize);
+          p.y = heroWaterY + dip + sz * 0.04 + bob;
+
+          // up prostopadłe do normalnej – z domyślnym (0,1,0) lookAt jest
+          // niestabilne, gdy normalna zbliża się do pionu
+          mesh.up.copy(heroRight);
+          mesh.lookAt(heroTarget.copy(p).add(heroNormal));
+          mesh.rotateZ(Math.cos(ts * 0.7 + cfg.phase) * 0.05);
+        }
+
+        if (tail > 0) {
+          // Kamera odchylona o swing od linii płatek–drzewo, żeby drzewo nie
+          // stało dokładnie za płatkiem. Nisko i z POZIOMYM wzrokiem: przy
+          // poziomej kamerze horyzont (czyli woda) wypada w połowie kadru.
+          const p = heroPetals[0].mesh.position;
+          camDir.copy(outV).multiplyScalar(Math.cos(HERO_PETAL.swing))
+            .addScaledVector(heroRight, Math.sin(HERO_PETAL.swing));
+          heroCam.copy(p)
+            .addScaledVector(camDir, HERO_PETAL.camDist * heroSize)
+            .addScaledVector(UP, HERO_PETAL.camHeight * heroSize);
+          camera.position.lerp(heroCam, tail);
+          levelV.set(p.x, heroCam.y, p.z);
+          lookAtV.lerp(levelV, tail);
+        }
+      }
+      camera.lookAt(lookAtV);
 
       // Klucz zawsze po lewej stronie kadru, rim po prawej i zza drzewa.
       // Cel obu lamp zostaje w zerze, więc liczy się sam kierunek.
@@ -1703,12 +1829,12 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       // drzewem, a offset przesuwa go w kadrze z prawej na lewą. Do tego
       // wschodzi. Ta sama pozycja idzie do smugi na wodzie i do chmur.
       {
-        const t = Math.min(smooth / MOON_RISE_SPAN, 1);
+        const t = Math.min(main / MOON_RISE_SPAN, 1);
         const e = t * t * (3 - 2 * t);
         const camAz = Math.atan2(camera.position.x, camera.position.z);
         const az = camAz + Math.PI + MOON_FROM + (MOON_TO - MOON_FROM) * e;
         const y = moonBaseY + moonRise * e;
-        const vis = 1 - Math.min(Math.max((smooth - MOON_FADE_FROM) / MOON_FADE_SPAN, 0), 1);
+        const vis = 1 - Math.min(Math.max((main - MOON_FADE_FROM) / MOON_FADE_SPAN, 0), 1);
         for (const b of moonBillboards) {
           b.position.set(Math.sin(az) * moonDist, y, Math.cos(az) * moonDist);
           b.lookAt(camera.position);
@@ -1728,7 +1854,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
       // przesunięcie drzewa w kadrze bez ruszania modelu
       camera.setViewOffset(
         el.clientWidth, el.clientHeight,
-        -k.shiftX * el.clientWidth * 0.5, 0,
+        -(k.shiftX * (1 - tail) + HERO_PETAL.shiftX * tail) * el.clientWidth * 0.5, 0,
         el.clientWidth, el.clientHeight
       );
       camera.updateProjectionMatrix();
@@ -1745,7 +1871,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         titleMesh.rotation.y = Math.atan2(cx, cz);
 
         // wynurzanie na starcie, potem zatapianie, gdy rusza orbita
-        const t = Math.min(Math.max(smooth / TITLE_OUT, 0), 1);
+        const t = Math.min(Math.max(main / TITLE_OUT, 0), 1);
         const out = t * t * (3 - 2 * t);
         const intro = reduce ? 1 : Math.min((now - t0) / TITLE.rise, 1);
         const up = 1 - Math.pow(1 - intro, 3);
@@ -1756,22 +1882,22 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         const node = captionRefs.current[i];
         if (!node) continue;
         const c = CAPTIONS[i];
-        const fadeIn = Math.min(Math.max((smooth - c.from) / CAPTION_FADE, 0), 1);
-        const fadeOut = 1 - Math.min(Math.max((smooth - (c.to - CAPTION_FADE)) / CAPTION_FADE, 0), 1);
+        const fadeIn = Math.min(Math.max((main - c.from) / CAPTION_FADE, 0), 1);
+        const fadeOut = 1 - Math.min(Math.max((main - (c.to - CAPTION_FADE)) / CAPTION_FADE, 0), 1);
         const a = Math.min(fadeIn, fadeOut);
         const e = a * a * (3 - 2 * a);
         node.style.opacity = String(e);
         node.style.transform = reduce ? '' : `translateY(${(1 - e) * 20}px)`;
       }
       if (copyEl) {
-        const t = Math.min(Math.max((smooth - COPY_FROM) / COPY_SPAN, 0), 1);
-        copyEl.style.opacity = String(t);
+        const t = Math.min(Math.max((main - COPY_FROM) / COPY_SPAN, 0), 1);
+        copyEl.style.opacity = String(t * (1 - tail));   // gaśnie, gdy kamera schodzi do wody
         copyEl.style.transform = `translateY(${(1 - t) * 24}px)`;
       }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;
       {
-        const f = Math.min(Math.max((smooth - BUTTERFLY_FROM) / 0.12, 0), 1);
+        const f = Math.min(Math.max((main - BUTTERFLY_FROM) / 0.12, 0), 1);
         uFly.value = f * f * (3 - 2 * f);
       }
       if (fluid && sceneRT && flowRead && flowWrite && quad && quadScene && quadCam && skyMat && flowMat && compMat) {

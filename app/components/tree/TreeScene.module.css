@@ -2,7 +2,7 @@
    w całości. Pin robi CSS position:sticky – bez bibliotek. */
 .section {
   position: relative;
-  height: 420vh;
+  height: 540vh;   /* 420vh części głównej + ogon TAIL na zjazd do płatka */
   /* Prawie czerń z ledwie widoczną poświatą za koroną — granatowe tło
      zjadało kontrast różu i cień po prawej stronie drzewa ginął. */
   background:
@@ -136,7 +136,7 @@
 }
 
 @media (max-width: 900px) {
-  .section { height: 320vh; }
+  .section { height: 410vh; }
   .copy {
     inset: auto 0 8vh 0;
     width: 100%;
