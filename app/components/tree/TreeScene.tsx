@@ -193,6 +193,15 @@ function titleTexture(text: string): { tex: THREE.CanvasTexture; aspect: number 
   return { tex, aspect: w / h };
 }
 
+/**
+ * Rozciągnięcie drzewa w pionie. Celowo NIE wchodzi do treeHeight ani fitSize:
+ * kamera, woda, pagórek i tytuł są liczone względem nich, więc gdyby weszło,
+ * kamera odjechałaby proporcjonalnie i drzewo w kadrze wyglądałoby tak samo.
+ * Skalujemy sam model, a to, co czyta jego geometrię (kwiaty, światełka,
+ * środek korony), dostaje ten sam mnożnik.
+ */
+const TREE_STRETCH = 1.12;
+
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
@@ -717,6 +726,9 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
           const sz = bb.getSize(new THREE.Vector3());
           fitSize = Math.max(sz.y, Math.max(sz.x, sz.z) * 0.85);
         }
+        // Dopiero teraz – box wyżej ma zostać nierozciągnięty, żeby kamera
+        // nie odjechała. Skala wokół origin, więc podstawa pnia zostaje na 0.
+        gltf.scene.scale.y = TREE_STRETCH;
 
         // ── kwiaty ─────────────────────────────────────────────────────
         // Korona z modelu to była ślepa uliczka: płatek ma tam ~3 cm przy
@@ -745,7 +757,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
             const v = new THREE.Vector3();
             for (let i = 0; i < pos.count; i++) {
               v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
-              if (v.y > treeHeight * BLOSSOM_FROM) spots.push(v.x, v.y, v.z);
+              if (v.y > treeHeight * TREE_STRETCH * BLOSSOM_FROM) spots.push(v.x, v.y, v.z);
             }
           });
           // Gałęzie z pierwszej decymacji to iglice o proporcji 1:1400 —
@@ -870,7 +882,7 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
               const bb = new THREE.Box3().setFromObject(gltf.scene);
               const sz = bb.getSize(new THREE.Vector3());
               const crownW = Math.max(sz.x, sz.z);
-              crownCenter.set(0, treeHeight * (BLOSSOM_FROM + 1) * 0.5 + treeHeight * 0.05, 0);
+              crownCenter.set(0, (treeHeight * (BLOSSOM_FROM + 1) * 0.5 + treeHeight * 0.05) * TREE_STRETCH, 0);
               const gm = new THREE.ShaderMaterial({
                 uniforms: { uCol: { value: new THREE.Color(0xff7fc0) }, uK: { value: CROWN_GLOW } },
                 vertexShader: `
@@ -1394,7 +1406,8 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         // osobny pass renderowany na całym ekranie co klatkę.
         const pos: number[] = [];
         const size: number[] = [];
-        for (const [x, y, z] of data.tips) {
+        for (const [x, y0, z] of data.tips) {
+          const y = y0 * TREE_STRETCH;   // tips.json jest w skali modelu sprzed rozciągnięcia
           for (let i = 0; i < 2; i++) {
             pos.push(
               x + (Math.random() - 0.5) * 0.35,
