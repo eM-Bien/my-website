@@ -519,11 +519,13 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const copyRef = useRef<HTMLDivElement | null>(null);
   const captionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const tailCopyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = hostRef.current;
     const sectionEl = sectionRef.current;
     const copyEl = copyRef.current;
+    const tailCopyEl = tailCopyRef.current;
     if (!el || !sectionEl) return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1894,6 +1896,15 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
         copyEl.style.opacity = String(t * (1 - tail));   // gaśnie, gdy kamera schodzi do wody
         copyEl.style.transform = `translateY(${(1 - t) * 24}px)`;
       }
+      if (tailCopyEl) {
+        // Na tailT (liniowym), nie na tail (wygładzonym): okno ma być
+        // przewidywalne w scrollu. Start po 30% zjazdu – blok końcowy jest
+        // już prawie niewidoczny, kamera w połowie drogi do wody.
+        const t = Math.min(Math.max((tailT - 0.3) / 0.4, 0), 1);
+        const e = t * t * (3 - 2 * t);
+        tailCopyEl.style.opacity = String(e);
+        tailCopyEl.style.transform = reduce ? '' : `translateY(${(1 - e) * 24}px)`;
+      }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;
       {
@@ -2021,6 +2032,15 @@ export default function TreeScene({ fluid = false }: { fluid?: boolean }) {
           <p>
             Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad
             minim veniam, quis nostrud exercitation.
+          </p>
+        </div>
+        {/* Tekst przy zbliżeniu na płatki. Ten sam styl co .copy – wchodzi w
+            to samo miejsce, gdy tamten gaśnie, więc czyta się jak podmiana. */}
+        <div className={s.copy} ref={tailCopyRef}>
+          <h2>Lorem ipsum dolor</h2>
+          <p>
+            Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et
+            dolore magna aliqua.
           </p>
         </div>
       </div>
