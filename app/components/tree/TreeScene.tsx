@@ -260,7 +260,9 @@ const DIVE = {
   screens: 1.6,   // ile ekranów scrolla za sekcją trwa zejście
   depth: 0.22,    // jak głęboko pod taflę (× rozmiar drzewa)
   murk: 1.4,      // gęstość mgły pod wodą (÷ rozmiar drzewa → density FogExp2)
-  cross: 0.15,    // grubość "przejścia przez taflę" (× rozmiar płatka)
+  cross: 1.0,     // grubość przejścia pod taflą (× rozmiar płatka): tint, mgła
+                  // i toń dochodzą do pełni dopiero tyle poniżej powierzchni.
+                  // Przy 0.15 wszystko wskakiwało w dwie klatki – czkawka.
 };
 
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
@@ -407,6 +409,8 @@ const SKY_FRAG = `
   uniform float uScroll;
   uniform float uViewport;   // jaka część gradientu mieści się w oknie
   uniform float uSub;        // 0 = nad wodą, 1 = pod
+  uniform float uHorizon;    // linia horyzontu w kadrze (0 = dół, 1 = góra)
+  uniform float uHide;       // 1 = tafla schowana: pod horyzontem ma być toń
   varying vec2 vUv;
   void main() {
     // Wycinek gradientu widoczny przez sticky stage. Liczony z realnej
@@ -422,7 +426,11 @@ const SKY_FRAG = `
     vec3 deep = uSky[0] * 0.8;
     vec3 glow = uSky[5] * 0.45;
     vec3 water = mix(deep, glow, pow(vUv.y, 2.2));
-    c = mix(c, water, uSub);
+    // Pod horyzontem toń wchodzi już wtedy, gdy tafla i Reflector gasną
+    // (tuż przed przejściem kamery) – inaczej przez te klatki widać przez
+    // dziurę po wodzie jasne niebo. Po zanurzeniu uSub kryje cały kadr.
+    float belowH = smoothstep(uHorizon + 0.006, uHorizon - 0.02, vUv.y);
+    c = mix(c, water, max(uSub, belowH * uHide));
     gl_FragColor = vec4(c, 1.0);
   }`;
 
@@ -451,6 +459,47 @@ function sampleKeys(p: number) {
 }
 
 /** Miękka kropka jako tekstura – to ona robi „świecenie", nie bloom. */
+/**
+ * Tekstura płatka z modelu to ATLAS: oprócz płatka (prawa część) ma brązową
+ * strzałkę (lewa kolumna) i dwa kwadraty (lewy dolny róg). Każdy płatek w
+ * scenie to kwadratowy quad z całą teksturą, więc bez tego rysowałby też
+ * te śmieci – w koronie giną w tłumie, przy kamerze widać je gołym okiem.
+ *
+ * Regiony w ułamkach rozmiaru obrazka (0..1, y od góry), żeby nie zależeć
+ * od rozdzielczości pliku. Dobrane pod obecny atlas; podmienisz teksturę –
+ * sprawdź, czy dalej pasują.
+ */
+const PETAL_ATLAS_JUNK: Array<[number, number, number, number]> = [
+  // Zmierzone na alfie pliku: płatek x 0.418–0.949, y 0.047–0.797;
+  // strzałka x 0.004–0.375; mały kwadrat x 0.379–0.414, y 0.746–0.777;
+  // rdzawy kwadrat x 0.379–0.527, y 0.805–0.949.
+  [0.0, 0.0, 0.416, 1.0],   // strzałka i mały kwadrat: wszystko na lewo od płatka
+  [0.0, 0.8, 0.62, 1.0],    // rdzawy kwadrat: wszystko poniżej płatka
+];
+
+function cleanPetalMap(src: THREE.Texture): THREE.Texture {
+  const img = src.image as { width: number; height: number } | undefined;
+  if (!img?.width || !img?.height) return src;
+  const cv = document.createElement('canvas');
+  cv.width = img.width;
+  cv.height = img.height;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return src;
+  ctx.drawImage(src.image as CanvasImageSource, 0, 0);
+  for (const [x0, y0, x1, y1] of PETAL_ATLAS_JUNK) {
+    ctx.clearRect(x0 * cv.width, y0 * cv.height, (x1 - x0) * cv.width, (y1 - y0) * cv.height);
+  }
+  const t = new THREE.CanvasTexture(cv);
+  // glTF trzyma tekstury bez odwracania Y (flipY=false); CanvasTexture
+  // domyślnie odwraca – bez skopiowania UV rozjechałyby się w pionie.
+  t.flipY = src.flipY;
+  t.colorSpace = src.colorSpace;
+  t.wrapS = src.wrapS;
+  t.wrapT = src.wrapT;
+  t.anisotropy = src.anisotropy;
+  return t;
+}
+
 function glowTexture() {
   const S = 64;
   const c = document.createElement('canvas');
@@ -602,6 +651,8 @@ export default function TreeScene({
     let titleMat: THREE.ShaderMaterial | null = null;
     let titleTex: THREE.Texture | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
+    let surfaceMesh: THREE.Mesh | null = null;
+    let floatMatRef: THREE.MeshStandardMaterial | null = null;
     let water: Reflector | null = null;
     const heroPetals: { mesh: THREE.Mesh; cfg: (typeof HERO_PETAL.group)[number] }[] = [];
     const heroAnchor = new THREE.Vector3();   // punkt na tafli, wokół którego leży grupa
@@ -693,6 +744,8 @@ export default function TreeScene({
           uScroll: { value: 0 },
           uViewport: { value: viewportFraction() },
           uSub: { value: 0 },
+          uHorizon: { value: 0.5 },
+          uHide: { value: 0 },
         },
         depthTest: false,
         depthWrite: false,
@@ -886,6 +939,7 @@ export default function TreeScene({
           });
 
           for (const m of hide) m.visible = false;
+          if (petalMap) petalMap = cleanPetalMap(petalMap);
           // Do przebiegu głębi pod napisem. Płatki z modelu i tak są ukryte;
           // własne płatki (InstancedMesh) tu nie trafiają – z materiałem
           // zastępczym straciłyby alphaTest i zasłaniałyby jako pełne karty.
@@ -1358,6 +1412,7 @@ export default function TreeScene({
             surface.layers.enable(LAYER_OCCLUDER);
             root.add(surface);
             waterMat = surface.material as THREE.ShaderMaterial;
+            surfaceMesh = surface;
 
             // ── tytuł ──────────────────────────────────────────────────
             // Czekamy na font: Cormorant dochodzi asynchronicznie, a canvas
@@ -1459,6 +1514,7 @@ export default function TreeScene({
               emissive: new THREE.Color(0xff6fae),
               emissiveIntensity: 0.08,
             });
+            floatMatRef = floatMat;
             floatMat.onBeforeCompile = (shader) => {
               shader.uniforms.uTime = uTime;
               shader.uniforms.uDrift = { value: treeHeight * FLOAT_DRIFT };
@@ -1498,6 +1554,18 @@ export default function TreeScene({
             if (floating.instanceColor) floating.instanceColor.needsUpdate = true;
             floating.frustumCulled = false;
             root.add(floating);
+            // Bez odbicia: płatek LEŻY na tafli, więc jego lustrzana kopia
+            // pokrywałaby się z nim samym. Ale dryf w shaderze unosi go na
+            // fali, przez co odbicie odsuwa się i od spodu (nieoświetlony
+            // back face) wychodzi jako ciemny "cień" obok każdego płatka.
+            if (water) {
+              const pass = water.onBeforeRender;
+              water.onBeforeRender = (...args) => {
+                floating.visible = false;
+                pass.apply(water, args);
+                floating.visible = true;
+              };
+            }
 
             // ── płatki do zbliżenia ─────────────────────────────────────
             // Osobne siatki, nie instancje: tamte dryfują w vertex shaderze
@@ -1522,6 +1590,19 @@ export default function TreeScene({
                 mesh.scale.setScalar(heroSize * cfg.size);
                 root.add(mesh);
                 heroPetals.push({ mesh, cfg });
+              }
+              // Bez odbicia. Reflector renderuje w 512 px i pod kątem
+              // stycznym, więc tekstura płatka trafia w najgrubsze mipmapy:
+              // alfa się uśrednia, alphaTest tnie ją w przypadkowy kształt,
+              // a w najmniejszym poziomie cały quad przechodzi test i wychodzi
+              // jako pełny kwadrat obok płatka.
+              if (water) {
+                const pass = water.onBeforeRender;
+                water.onBeforeRender = (...args) => {
+                  for (const { mesh } of heroPetals) mesh.visible = false;
+                  pass.apply(water, args);
+                  for (const { mesh } of heroPetals) mesh.visible = true;
+                };
               }
             }
           }
@@ -1791,6 +1872,7 @@ export default function TreeScene({
     const heroTarget = new THREE.Vector3();
     const camDir = new THREE.Vector3();
     const levelV = new THREE.Vector3();
+    const horizonV = new THREE.Vector3();
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       if (!visible) return;
@@ -1870,7 +1952,50 @@ export default function TreeScene({
         sub = Math.min(Math.max((heroWaterY - camera.position.y) / (DIVE.cross * heroSize), 0), 1);
       }
       murk.density = (sub * DIVE.murk) / fitSize;
+
+      // Płatki przy kamerze: na tafli były bohaterem kadru, od spodu to
+      // wielkie brunatne plamy tuż przed obiektywem – kurczą się do zera
+      // razem z zanurzeniem.
+      for (const { mesh, cfg } of heroPetals) {
+        mesh.scale.setScalar(heroSize * cfg.size * (1 - sub));
+      }
+      // Płatki dryfujące od spodu: materiał jest oświetlany z góry, więc
+      // spód wychodzi prawie czarny. Pod wodą dokładamy im własne światło –
+      // stają się różowymi sylwetkami na tle poświaty tafli.
+      if (floatMatRef) floatMatRef.emissiveIntensity = 0.08 + sub * 0.5;
+
+      // Kamera przechodzi przez płaszczyznę tafli. Gdy jest o włos nad nią,
+      // near plane tnie quad pod kątem stycznym i przez klatkę na ekranie
+      // jest rozmazana wstęga tintu. Od spodu tafla i tak jest niewidoczna
+      // (FrontSide), więc chowamy ją odrobinę WCZEŚNIEJ, zanim to nastąpi.
+      let hide = 0;
+      if (heroSize > 0) {
+        const above = camera.position.y - heroWaterY;
+        if (surfaceMesh) surfaceMesh.visible = above > 0.08 * heroSize;
+        if (water) water.visible = above > 0.02 * heroSize;
+        // 0 → 1 między 0.08h a 0.02h nad taflą: dochodzi do 1 dokładnie w
+        // chwili, gdy Reflector gaśnie – wtedy niebo pod horyzontem musi już
+        // być tonią. Wyżej Reflector i tak zakrywa niebo, więc rampa jest
+        // niewidoczna.
+        hide = 1 - Math.min(Math.max((above - 0.02 * heroSize) / (0.06 * heroSize), 0), 1);
+      }
       camera.lookAt(lookAtV);
+
+      // Horyzont w kadrze: rzut dalekiego punktu na poziomie tafli, w
+      // kierunku patrzenia. Potrzebny shaderowi nieba, żeby wiedział, od
+      // której linii w dół malować toń.
+      let horizon = 0.5;
+      if (heroSize > 0) {
+        camera.updateMatrixWorld();
+        horizonV.subVectors(lookAtV, camera.position);
+        horizonV.y = 0;
+        if (horizonV.lengthSq() > 1e-6) {
+          horizonV.normalize().multiplyScalar(fitSize * 60).add(camera.position);
+          horizonV.y = heroWaterY;
+          horizonV.project(camera);
+          horizon = Math.min(Math.max(horizonV.y * 0.5 + 0.5, 0), 1);
+        }
+      }
 
       // Klucz zawsze po lewej stronie kadru, rim po prawej i zza drzewa.
       // Cel obu lamp zostaje w zerze, więc liczy się sam kierunek.
@@ -1979,6 +2104,8 @@ export default function TreeScene({
         // 1. niebo + scena do tekstury
         skyMat.uniforms.uScroll.value = smooth;
         skyMat.uniforms.uSub.value = sub;
+        skyMat.uniforms.uHorizon.value = horizon;
+        skyMat.uniforms.uHide.value = hide;
         compMat.uniforms.uSub.value = sub;
         renderer.setRenderTarget(sceneRT);
         renderer.clear();
