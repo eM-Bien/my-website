@@ -1,0 +1,129 @@
+/* ── Sekcja ─────────────────────────────────────────────────────────────
+   Bez tła: pod spodem jest fixed canvas sceny z wodą. z-index nad
+   stage'em (0); position – żeby z-index działał. */
+.section {
+  position: relative;
+  z-index: 1;
+  padding-block: clamp(6rem, 18vh, 16rem);
+  color: var(--text);
+  font-family: var(--font-caption), Arial, sans-serif;
+}
+
+/* ── Wiersz: tekst po lewej, grafika po prawej ─────────────────────────
+   Grafika wyśrodkowana w pionie względem całego bloku tekstu – we wzorcu
+   siedzi na wysokości między nagłówkiem a akapitem. */
+.inner {
+  width: min(100% - 2 * clamp(1.5rem, 5vw, 5rem), 90rem);
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 8rem);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2rem, 5vh, 4rem);
+}
+
+/* Nagłówek-zdanie: duży, ale LEKKI. Rozmiar plakatu, głos spokojny –
+   celowo inaczej niż plakatowe podpisy w scenie. */
+.statement {
+  margin: 0;
+  max-width: 22ch;
+  font-size: clamp(1.8rem, 1.1rem + 2.2vw, 3.1rem);
+  font-weight: 300;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  text-shadow: 0 0 28px rgba(0, 0, 0, 0.55);
+}
+
+.line {
+  display: block;
+}
+
+/* Gwiazdka w wąskiej kolumnie, akapity wcięte – jak przypis do nagłówka. */
+.note {
+  display: grid;
+  grid-template-columns: clamp(3.5rem, 8vw, 8rem) minmax(0, 1fr);
+  align-items: start;
+}
+
+.mark {
+  font-size: 1.4rem;
+  font-weight: 400;
+  line-height: 1;
+  transform: translateY(0.15em);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  max-width: 34ch;
+
+  p {
+    margin: 0;
+    font-size: clamp(0.95rem, 0.9rem + 0.25vw, 1.1rem);
+    font-weight: 500;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* Grafika: prostokąt bez zaokrągleń, jak we wzorcu. Proporcje ~3:2. */
+.figure {
+  width: 100%;
+  max-width: 34rem;
+  justify-self: end;
+  aspect-ratio: 3 / 2;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(154, 95, 183, 0.5), transparent 55%),
+    radial-gradient(circle at 75% 70%, rgba(29, 102, 189, 0.45), transparent 55%),
+    rgba(0, 0, 0, 0.35);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+/* ── Wynurzanie ─────────────────────────────────────────────────────────
+   Przed wejściem w kadr: niżej, przezroczyste, rozmyte – jak w toni.
+   [data-in] ustawia Reveal. */
+.inner {
+  opacity: 0;
+  transform: translateY(2.5rem);
+  filter: blur(6px);
+  transition:
+    opacity 0.9s ease,
+    transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
+    filter 0.9s ease;
+
+  &[data-in] {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .inner {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+  .figure {
+    justify-self: stretch;
+    max-width: none;
+  }
+  .note {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inner {
+    transition-duration: 0.3s;
+    filter: none;
+    transform: none;
+  }
+}

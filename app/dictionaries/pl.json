@@ -17,5 +17,13 @@
       "heading": "Lorem ipsum dolor",
       "body": "Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
     }
+  },
+  "about": {
+    "label": "O mnie",
+    "statement": "Cześć,\nlubię prostotę, odrobinę szaleństwa, wyrazistą tożsamość i dopracowane animacje.",
+    "paragraphs": [
+      "Wygląda na to, że trafiłeś na moje portfolio.",
+      "Czy jesteś tu z ciekawości, szukasz inspiracji, czy po prostu zabłądziłeś — miło mi gościć Cię w moim świecie."
+    ]
   }
 }

@@ -8,15 +8,17 @@ import "../globals.scss";
 /**
  * Root layout strony. Scena WebGL siedzi TU, nad segmentem [lang] – dlatego
  * przełączenie /pl → /en jej nie przebudowuje: root layout zostaje
- * zamontowany, wymienia się tylko to, co [lang] renderuje jako children,
- * czyli same teksty. TextSwap robi z tej wymiany przenikanie z rozmyciem.
+ * zamontowany, wymienia się tylko to, co [lang] renderuje.
+ *
+ * Dwa sloty (parallel routes):
+ *  - scene    → @scene/[lang]/page.tsx: teksty do WNĘTRZA sceny, przez
+ *               TextSwap (dym przy zmianie języka)
+ *  - children → [lang]/page.tsx: sekcje POD sceną
  *
  * Przełącznik i HtmlLang też są tu, a nie pod [lang]: inaczej przechodziłyby
  * przez TextSwap i przełącznik mrugałby podwójnie przy każdej zmianie.
- * Język czytają ze ścieżki. <html lang> ma wartość domyślną; właściwą
- * ustawia HtmlLang.
  */
-export default function SiteLayout({ children }: LayoutProps<"/">) {
+export default function SiteLayout({ children, scene }: LayoutProps<"/">) {
   return (
     <html lang="pl" className={fontVariables}>
       <body>
@@ -24,8 +26,9 @@ export default function SiteLayout({ children }: LayoutProps<"/">) {
         <LangSwitch />
         <main>
           <TreeScene fluid>
-            <TextSwap>{children}</TextSwap>
+            <TextSwap>{scene}</TextSwap>
           </TreeScene>
+          {children}
         </main>
       </body>
     </html>

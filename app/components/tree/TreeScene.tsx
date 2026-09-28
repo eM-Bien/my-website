@@ -251,6 +251,18 @@ const HERO_PETAL = {
   ],
 };
 
+/**
+ * Zanurzenie: za końcem sekcji sceny (overscroll) kamera schodzi z pozycji
+ * przy płatkach pod taflę. Pod wodą: mgła (FogExp2) na materiałach sceny,
+ * niebo zamienione na toń z poświatą u góry, tint i winieta w composite.
+ */
+const DIVE = {
+  screens: 1.6,   // ile ekranów scrolla za sekcją trwa zejście
+  depth: 0.22,    // jak głęboko pod taflę (× rozmiar drzewa)
+  murk: 1.4,      // gęstość mgły pod wodą (÷ rozmiar drzewa → density FogExp2)
+  cross: 0.15,    // grubość "przejścia przez taflę" (× rozmiar płatka)
+};
+
 const COPY_FROM = 0.72;   // od którego progressu wchodzi tekst
 const COPY_SPAN = 0.18;
 
@@ -318,6 +330,7 @@ const COMPOSITE_FRAG = `
   uniform float uStrength;
   uniform float uSplit;
   uniform float uInk;
+  uniform float uSub;
   varying vec2 vUv;
   void main() {
     vec2 flow = texture2D(tFlow, vUv).xy;
@@ -334,6 +347,12 @@ const COMPOSITE_FRAG = `
     // PIONOWY, więc przesunięcie w poziomie nie zmienia ani jednego piksela.
     // Smuga musi więc także rozjaśniać, nie tylko wyginać.
     col += vec3(0.34, 0.20, 0.46) * smoothstep(0.0, 1.0, length(flow)) * uInk;
+
+    // Pod wodą: chłodniejszy, ciemniejszy tint i winieta – światło nie
+    // dociera do brzegów kadru.
+    vec3 tinted = col * vec3(0.62, 0.66, 0.95);
+    float vig = 1.0 - 0.55 * smoothstep(0.35, 1.0, length(vUv - 0.5) * 1.6);
+    col = mix(col, tinted * vig, uSub);
 
     gl_FragColor = vec4(col, g.a);
   }`;
@@ -387,6 +406,7 @@ const SKY_FRAG = `
   uniform float uStop[6];
   uniform float uScroll;
   uniform float uViewport;   // jaka część gradientu mieści się w oknie
+  uniform float uSub;        // 0 = nad wodą, 1 = pod
   varying vec2 vUv;
   void main() {
     // Wycinek gradientu widoczny przez sticky stage. Liczony z realnej
@@ -396,6 +416,13 @@ const SKY_FRAG = `
     for (int i = 1; i < 6; i++) {
       c = mix(c, uSky[i], smoothstep(uStop[i - 1], uStop[i], t));
     }
+    // Toń: ciemna, z poświatą u góry kadru – tam jest tafla, przez którą
+    // przebija różowe niebo (uSky[5] przygaszone). Kamera patrzy poziomo,
+    // więc "góra kadru" = "w stronę powierzchni".
+    vec3 deep = uSky[0] * 0.8;
+    vec3 glow = uSky[5] * 0.45;
+    vec3 water = mix(deep, glow, pow(vUv.y, 2.2));
+    c = mix(c, water, uSub);
     gl_FragColor = vec4(c, 1.0);
   }`;
 
@@ -546,6 +573,11 @@ export default function TreeScene({
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
+    // Mgła podwodna. Jest od startu z gęstością 0: three dokłada kod mgły
+    // do shaderów przy kompilacji, więc włączenie jej później oznaczałoby
+    // przekompilowanie wszystkich materiałów w połowie animacji.
+    const murk = new THREE.FogExp2(0x0a0512, 0);
+    scene.fog = murk;
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 200);
 
     // Ambient trzymany nisko: przy 2.2 kierunek światła ginął i obrót
@@ -660,6 +692,7 @@ export default function TreeScene({
           uStop: { value: SKY.map((k) => k.at) },
           uScroll: { value: 0 },
           uViewport: { value: viewportFraction() },
+          uSub: { value: 0 },
         },
         depthTest: false,
         depthWrite: false,
@@ -688,6 +721,7 @@ export default function TreeScene({
           uStrength: { value: FLUID.strength },
           uSplit: { value: FLUID.split },
           uInk: { value: FLUID.ink },
+          uSub: { value: 0 },
         },
         depthTest: false,
         depthWrite: false,
@@ -1730,9 +1764,14 @@ export default function TreeScene({
       .catch((e) => console.error('[tree] nie udało się wczytać modelu', e));
 
     /** Progress scrolla liczony z pozycji sekcji – bez bibliotek. */
+    // Ile ekranów za końcem sekcji jesteśmy (0 = jeszcze w sekcji). Stage
+    // jest fixed, więc woda zostaje, gdy zaczynają się kolejne sekcje – tym
+    // tłumimy to, co w scenie nie powinno pod nimi leżeć.
+    let overscroll = 0;
     const scrollProgress = () => {
       const r = sectionEl.getBoundingClientRect();
       const total = r.height - window.innerHeight;
+      overscroll = Math.max(-r.top - total, 0) / window.innerHeight;
       if (total <= 0) return 0;
       return Math.min(Math.max(-r.top / total, 0), 1);
     };
@@ -1816,6 +1855,21 @@ export default function TreeScene({
           lookAtV.lerp(levelV, tail);
         }
       }
+      // Zanurzenie za końcem sekcji. Wysokość kamery zjeżdża z pozycji przy
+      // płatkach pod taflę; wzrok zostaje poziomy, żeby tafla "przeszła"
+      // przez kadr z góry na dół.
+      const diveT = Math.min(overscroll / DIVE.screens, 1);
+      const dive = diveT * diveT * (3 - 2 * diveT);
+      let sub = 0;
+      if (dive > 0 && heroSize > 0) {
+        const targetY = heroWaterY - DIVE.depth * fitSize;
+        camera.position.y += (targetY - camera.position.y) * dive;
+        lookAtV.y = camera.position.y;
+        // 0 → 1 w cienkiej warstwie wokół tafli: przejście ma być skokiem,
+        // nie powolnym ciemnieniem od połowy drogi
+        sub = Math.min(Math.max((heroWaterY - camera.position.y) / (DIVE.cross * heroSize), 0), 1);
+      }
+      murk.density = (sub * DIVE.murk) / fitSize;
       camera.lookAt(lookAtV);
 
       // Klucz zawsze po lewej stronie kadru, rim po prawej i zza drzewa.
@@ -1865,7 +1919,7 @@ export default function TreeScene({
       // przesunięcie drzewa w kadrze bez ruszania modelu
       camera.setViewOffset(
         el.clientWidth, el.clientHeight,
-        -(k.shiftX * (1 - tail) + HERO_PETAL.shiftX * tail) * el.clientWidth * 0.5, 0,
+        -(k.shiftX * (1 - tail) + HERO_PETAL.shiftX * tail) * (1 - dive) * el.clientWidth * 0.5, 0,
         el.clientWidth, el.clientHeight
       );
       camera.updateProjectionMatrix();
@@ -1911,7 +1965,9 @@ export default function TreeScene({
         // przewidywalne w scrollu. Start po 30% zjazdu – blok końcowy jest
         // już prawie niewidoczny, kamera w połowie drogi do wody.
         const t = Math.min(Math.max((tailT - 0.3) / 0.4, 0), 1);
-        fadeVar('--tail', t * t * (3 - 2 * t), 24);
+        // gaśnie w ciągu pół ekranu za końcem sekcji – tam wjeżdżają realizacje
+        const under = 1 - Math.min(overscroll / 0.5, 1);
+        fadeVar('--tail', t * t * (3 - 2 * t) * under, 24);
       }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;
@@ -1922,6 +1978,8 @@ export default function TreeScene({
       if (fluid && sceneRT && flowRead && flowWrite && quad && quadScene && quadCam && skyMat && flowMat && compMat) {
         // 1. niebo + scena do tekstury
         skyMat.uniforms.uScroll.value = smooth;
+        skyMat.uniforms.uSub.value = sub;
+        compMat.uniforms.uSub.value = sub;
         renderer.setRenderTarget(sceneRT);
         renderer.clear();
         quad.material = skyMat;

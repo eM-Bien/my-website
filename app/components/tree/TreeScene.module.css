@@ -9,11 +9,19 @@
     radial-gradient(ellipse at 50% 32%, #050309 0%, #020105 55%, #000000 100%);
 }
 
+/* Fixed, nie sticky: sticky kończy się razem z sekcją i woda odjeżdżałaby
+   w górę, gdy zaczynają się realizacje. Fixed zostaje pod całą stroną –
+   dalsze sekcje przewijają się PO wodzie z przezroczystym tłem. Sekcja
+   sceny dalej daje długość scrolla; po jej końcu progress trzyma się 1
+   (kamera zostaje przy płatkach). */
 .stage {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  width: 100%;
   height: 100vh;
   overflow: hidden;
+  z-index: 0;
 }
 
 .canvas {
