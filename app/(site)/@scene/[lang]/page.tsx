@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { SceneCaption, SceneCopy, SceneTailCopy } from "@/app/components/tree/SceneText";
+import { SceneCaption, SceneCopy } from "@/app/components/tree/SceneText";
 import { getDictionary, hasLocale, locales } from "@/app/dictionaries";
 
 export function generateStaticParams() {
@@ -30,7 +30,6 @@ export default async function ScenePage({ params }: PageProps<"/[lang]">) {
       ))}
 
       <SceneCopy heading={scene.copy.heading}>{scene.copy.body}</SceneCopy>
-      <SceneTailCopy heading={scene.tail.heading}>{scene.tail.body}</SceneTailCopy>
     </>
   );
 }

@@ -121,27 +121,8 @@
   font-family: var(--font-caption), Arial, sans-serif;
 }
 
-/* Nagłówek jak podpisy: wersaliki, Black, wiersze na styk. */
-.copy h2 {
-  font-size: clamp(1.8rem, 0.6rem + 3vw, 3.8rem);
-  font-weight: 900;
-  line-height: 0.95;
-  letter-spacing: -0.01em;
-  text-transform: uppercase;
-  margin: 0 0 1.25rem;
-  text-shadow: 0 0 24px rgba(0, 0, 0, 0.5);
-}
-
-.copy p {
-  margin: 0;
-  max-width: 34ch;
-  /* Ten sam krój, ale NIE wersalikami i nie w 900 – kilka zdań Blackiem
-     wielkimi literami to ściana, której nikt nie przeczyta. */
-  font-size: clamp(1rem, 0.9rem + 0.4vw, 1.25rem);
-  font-weight: 500;
-  line-height: 1.55;
-  color: rgba(255, 255, 255, 0.78);
-}
+/* Typografia bloku (nagłówek, gwiazdka, akapit) jest globalna: .tb-* w
+   globals.scss – ten sam układ co w sekcjach pod sceną. */
 
 @media (max-width: 900px) {
   .section { height: 410vh; }

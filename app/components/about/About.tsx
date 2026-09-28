@@ -16,7 +16,7 @@ export default function About({ data }: { data: AboutData }) {
       <Reveal id="about" className={s.inner}>
         <div className={`${s.text} swap-text`}>
           {/* \n w słowniku = łamanie linii ("Cześć," w osobnym wierszu) */}
-          <h2 id="about-heading" className={s.statement}>
+          <h2 id="about-heading" className="tb-heading">
             {data.statement.split("\n").map((line, i) => (
               <span key={i} className={s.line}>
                 {line}
@@ -24,11 +24,11 @@ export default function About({ data }: { data: AboutData }) {
             ))}
           </h2>
 
-          <div className={s.note}>
-            <span className={s.mark} aria-hidden="true">
+          <div className="tb-note">
+            <span className="tb-mark" aria-hidden="true">
               *
             </span>
-            <div className={s.body}>
+            <div className="tb-body">
               {data.paragraphs.map((p, i) => (
                 <p key={i}>{p}</p>
               ))}

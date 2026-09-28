@@ -4,7 +4,7 @@ import s from "./TreeScene.module.css";
 /**
  * Teksty nad sceną. Same nie wiedzą, kiedy są widoczne – czytają zmienne
  * CSS, które pętla renderująca TreeScene ustawia na sekcji co klatkę
- * (--cap-0, --copy, --tail i ich odpowiedniki -y). Dzięki temu treść może
+ * (--cap-0, --copy i ich odpowiedniki -y). Dzięki temu treść może
  * przyjść z serwera i wymienić się przy zmianie języka, a scena – która
  * trzyma timing – zostaje nietknięta.
  *
@@ -28,22 +28,28 @@ export function SceneCaption({ index, children }: { index: number; children: Rea
   );
 }
 
+/** Nagłówek + gwiazdka + wcięty akapit – układ wspólny z sekcjami (.tb-*). */
+function TextBlock({ heading, children }: { heading: string; children: ReactNode }) {
+  return (
+    <>
+      <h2 className="tb-heading">{heading}</h2>
+      <div className="tb-note">
+        <span className="tb-mark" aria-hidden="true">
+          *
+        </span>
+        <div className="tb-body">
+          <p>{children}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /** Blok po przekadrowaniu drzewa w prawo. */
 export function SceneCopy({ heading, children }: { heading: string; children: ReactNode }) {
   return (
     <div className={s.copy} style={fade("--copy", 24)}>
-      <h2>{heading}</h2>
-      <p>{children}</p>
-    </div>
-  );
-}
-
-/** Blok przy zbliżeniu na płatki – to samo miejsce co SceneCopy, po nim. */
-export function SceneTailCopy({ heading, children }: { heading: string; children: ReactNode }) {
-  return (
-    <div className={s.copy} style={fade("--tail", 24)}>
-      <h2>{heading}</h2>
-      <p>{children}</p>
+      <TextBlock heading={heading}>{children}</TextBlock>
     </div>
   );
 }

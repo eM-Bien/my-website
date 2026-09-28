@@ -597,7 +597,7 @@ function butterflyTexture() {
 /**
  * Teksty nad sceną przychodzą jako children (patrz SceneText.tsx) i lądują
  * w .stage nad canvasem. Scena nie trzyma do nich refów – zamiast tego co
- * klatkę ustawia na sekcji zmienne CSS (--cap-N, --copy, --tail + -y),
+ * klatkę ustawia na sekcji zmienne CSS (--cap-N, --copy + -y),
  * a teksty je czytają. Dzięki temu treść może się wymienić (zmiana języka)
  * bez dotykania sceny.
  */
@@ -2132,15 +2132,6 @@ export default function TreeScene({
       {
         const t = Math.min(Math.max((main - COPY_FROM) / COPY_SPAN, 0), 1);
         fadeVar('--copy', t * (1 - tail), 24);   // gaśnie, gdy kamera schodzi do wody
-      }
-      {
-        // Na tailT (liniowym), nie na tail (wygładzonym): okno ma być
-        // przewidywalne w scrollu. Start po 30% zjazdu – blok końcowy jest
-        // już prawie niewidoczny, kamera w połowie drogi do wody.
-        const t = Math.min(Math.max((tailT - 0.3) / 0.4, 0), 1);
-        // gaśnie w ciągu pół ekranu za końcem sekcji – tam wjeżdżają realizacje
-        const under = 1 - Math.min(overscroll / 0.5, 1);
-        fadeVar('--tail', t * t * (3 - 2 * t) * under, 24);
       }
 
       uTime.value = reduce ? 0 : (now - t0) / 1000;

@@ -22,57 +22,16 @@
   gap: clamp(2rem, 6vw, 8rem);
 }
 
+/* Typografia bloku (nagłówek, gwiazdka, akapity) jest globalna: .tb-* w
+   globals.scss – ten sam układ co w blokach w scenie. Tu tylko to, co
+   jest specyficzne dla tej sekcji. */
 .text {
   display: flex;
   flex-direction: column;
-  gap: clamp(2rem, 5vh, 4rem);
-}
-
-/* Nagłówek-zdanie: duży, ale LEKKI. Rozmiar plakatu, głos spokojny –
-   celowo inaczej niż plakatowe podpisy w scenie. */
-.statement {
-  margin: 0;
-  max-width: 22ch;
-  font-size: clamp(1.8rem, 1.1rem + 2.2vw, 3.1rem);
-  font-weight: 300;
-  line-height: 1.15;
-  letter-spacing: -0.015em;
-  text-shadow: 0 0 28px rgba(0, 0, 0, 0.55);
 }
 
 .line {
   display: block;
-}
-
-/* Gwiazdka w wąskiej kolumnie, akapity wcięte – jak przypis do nagłówka. */
-.note {
-  display: grid;
-  grid-template-columns: clamp(3.5rem, 8vw, 8rem) minmax(0, 1fr);
-  align-items: start;
-}
-
-.mark {
-  font-size: 1.4rem;
-  font-weight: 400;
-  line-height: 1;
-  transform: translateY(0.15em);
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.body {
-  display: flex;
-  flex-direction: column;
-  gap: 1.4rem;
-  max-width: 34ch;
-
-  p {
-    margin: 0;
-    font-size: clamp(0.95rem, 0.9rem + 0.25vw, 1.1rem);
-    font-weight: 500;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.82);
-    text-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-  }
 }
 
 /* Grafika: prostokąt bez zaokrągleń, jak we wzorcu. Proporcje ~3:2.
@@ -118,9 +77,6 @@
   .figure {
     justify-self: stretch;
     max-width: none;
-  }
-  .note {
-    grid-template-columns: 2.5rem minmax(0, 1fr);
   }
 }
 
