@@ -13,8 +13,8 @@ type AboutData = Dictionary["about"];
 export default function About({ data }: { data: AboutData }) {
   return (
     <section id="o-mnie" className={s.section} aria-labelledby="about-heading">
-      <Reveal className={s.inner}>
-        <div className={s.text}>
+      <Reveal id="about" className={s.inner}>
+        <div className={`${s.text} swap-text`}>
           {/* \n w słowniku = łamanie linii ("Cześć," w osobnym wierszu) */}
           <h2 id="about-heading" className={s.statement}>
             {data.statement.split("\n").map((line, i) => (

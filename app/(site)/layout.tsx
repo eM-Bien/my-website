@@ -28,7 +28,9 @@ export default function SiteLayout({ children, scene }: LayoutProps<"/">) {
           <TreeScene fluid>
             <TextSwap>{scene}</TextSwap>
           </TreeScene>
-          {children}
+          {/* Sekcje pod sceną dostają ten sam dym przy zmianie języka, tylko
+              w trybie przepływu – warstwy nie są przypięte do sceny. */}
+          <TextSwap layout="flow">{children}</TextSwap>
         </main>
       </body>
     </html>

@@ -18,6 +18,17 @@
   --rise: -5vh;
 }
 
+/* Tryb "flow": host trzyma miejsce w przepływie, warstwa wchodząca jest
+   zwykłym blokiem, wychodząca (.layer) leży absolute nad nią. Same warstwy
+   nie animują się – robi to treść przez .swap-text (globals.scss). */
+.host {
+  position: relative;
+}
+
+.layerFlow {
+  position: relative;
+}
+
 /* Wejście: dym się zbiera – z góry, z rozdętej plamy, w ostry tekst.
    Zaczyna dopiero, gdy stary zniknął: delay = OUT_MS, czas = IN_MS
    (obie liczby w TextSwap.tsx). Fill "both" trzyma stan "from" (opacity 0)

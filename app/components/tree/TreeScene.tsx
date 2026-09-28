@@ -102,8 +102,13 @@ const CLOUD_OPACITY = 0.85;
 const MOON_FROM = -0.3;
 const MOON_TO = 0.9;
 // Pod koniec scrolla księżyc gaśnie – zostaje kadr z koroną i tekstem.
-const MOON_FADE_FROM = 0.7;    // progress, od którego zaczyna znikać
-const MOON_FADE_SPAN = 0.18;
+const MOON_FADE_FROM = 0.7;    // progress, od którego księżyc wychodzi z kadru
+const MOON_FADE_SPAN = 0.18;   // w jakiej części scrolla trwa wyjście
+// Wyjście: tarcza NIE blednie, tylko wznosi się nad górną krawędź kadru.
+// Wysokość w ułamku odległości od kamery, bo to daje kąt: 0.75 × dystans to
+// ~37° nad poziomem, a górna krawędź kadru przy FOV 45° i kamerze patrzącej
+// lekko w górę (ostatni klucz) leży ~30° nad poziomem. Wychodzi z zapasem.
+const MOON_EXIT = 0.75;
 const MOON_AZIMUTH = Math.PI - 0.5;  // pozycja startowa (nadpisywana w pętli)
 const MOON_SIZE = 0.34;        // promień tarczy = MOON_SIZE × wysokość drzewa × 5
 const MOON_ELEV = 0.55;        // ile tarczy wystaje ponad szczyty na starcie (0..1)
@@ -615,8 +620,16 @@ export default function TreeScene({
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const renderer = new THREE.WebGLRenderer({
+      // W trybie fluid kadr i tak powstaje w teksturze bez MSAA, a na ekran
+      // idzie jeden quad – wygładzanie framebuffera to wtedy czysty koszt.
+      antialias: !fluid,
+      alpha: true,
+      powerPreference: 'high-performance',   // laptop z dwiema kartami: bierz mocniejszą
+    });
+    // 1.5 zamiast 2: na retinie różnica w ostrości ledwo widoczna, a pikseli
+    // do policzenia o 44% mniej.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.setClearColor(0x000000, 0);
     el.appendChild(renderer.domElement);
@@ -651,8 +664,9 @@ export default function TreeScene({
     let titleMat: THREE.ShaderMaterial | null = null;
     let titleTex: THREE.Texture | null = null;
     let waterMat: THREE.ShaderMaterial | null = null;
+    let frame = 0;   // licznik klatek: Reflector renderuje tylko w parzystych
     let surfaceMesh: THREE.Mesh | null = null;
-    let floatMatRef: THREE.MeshStandardMaterial | null = null;
+    let floatMatRef: THREE.MeshLambertMaterial | null = null;
     let water: Reflector | null = null;
     const heroPetals: { mesh: THREE.Mesh; cfg: (typeof HERO_PETAL.group)[number] }[] = [];
     const heroAnchor = new THREE.Vector3();   // punkt na tafli, wokół którego leży grupa
@@ -951,11 +965,12 @@ export default function TreeScene({
           const n = spots.length / 3;
           if (n > 0) {
             const geo = new THREE.PlaneGeometry(1, 1);
-            const mat = new THREE.MeshStandardMaterial({
+            // Lambert, nie Standard: to najdroższy materiał w scenie (43 tys.
+            // kart z alphaTest, dwustronnych). PBR liczyłby GGX dla każdego
+            // fragmentu, a przy roughness 0.85 wynik i tak jest matowy.
+            const mat = new THREE.MeshLambertMaterial({
               map: petalMap,
               color: 0xd8cff0,   // odbicie jasne – warstwa tafli i tak je tłumi
-              roughness: 0.85,
-              metalness: 0,
               // Tekstura płatka jest blada (średnio 176,144,144), a światło
               // w scenie zimne — bez podbicia korona wychodzi szarobura.
               emissive: new THREE.Color(0xff6fae),
@@ -1134,6 +1149,17 @@ export default function TreeScene({
             water.rotation.x = -Math.PI / 2;
             water.position.y = waterY;
             root.add(water);
+            // Najgłębszy wrapper (wszystkie późniejsze owijają ten): w klatce
+            // nieparzystej odbicie nie jest przeliczane, tekstura zostaje z
+            // poprzedniej. Kamera między klatkami rusza się o ułamek, więc
+            // przesunięcia nie widać.
+            {
+              const pass = water.onBeforeRender;
+              water.onBeforeRender = (...args) => {
+                if (frame & 1) return;
+                pass.apply(water, args);
+              };
+            }
 
             // ── góry ───────────────────────────────────────────────────
             // Walec dookoła sceny, oglądany od środka. Tekstura powtarzana
@@ -1215,7 +1241,7 @@ export default function TreeScene({
                     }
                     float fbm(vec3 p) {
                       float a = 0.5, s = 0.0;
-                      for (int i = 0; i < 5; i++) {
+                      for (int i = 0; i < 4; i++) {
                         s += a * noise(p);
                         p = p * 2.03 + vec3(3.1, 1.7, 0.9);
                         a *= 0.5;
@@ -1504,10 +1530,8 @@ export default function TreeScene({
             // po tafli. Przesunięcie dokładane PO instanceMatrix, w
             // przestrzeni świata: karty leżą płasko, więc ich lokalne osie
             // nie pokrywają się ze światem.
-            const floatMat = new THREE.MeshStandardMaterial({
+            const floatMat = new THREE.MeshLambertMaterial({
               map: petalMap,
-              roughness: 0.6,
-              metalness: 0,
               side: THREE.DoubleSide,
               alphaTest: 0.5,
               transparent: false,
@@ -1849,12 +1873,20 @@ export default function TreeScene({
     // jest fixed, więc woda zostaje, gdy zaczynają się kolejne sekcje – tym
     // tłumimy to, co w scenie nie powinno pod nimi leżeć.
     let overscroll = 0;
-    const scrollProgress = () => {
+    let sectionTop = 0;
+    let sectionHeight = 0;
+    const measureSection = () => {
       const r = sectionEl.getBoundingClientRect();
-      const total = r.height - window.innerHeight;
-      overscroll = Math.max(-r.top - total, 0) / window.innerHeight;
+      sectionTop = r.top + window.scrollY;
+      sectionHeight = r.height;
+    };
+    measureSection();
+    const scrollProgress = () => {
+      const top = sectionTop - window.scrollY;
+      const total = sectionHeight - window.innerHeight;
+      overscroll = Math.max(-top - total, 0) / window.innerHeight;
       if (total <= 0) return 0;
-      return Math.min(Math.max(-r.top / total, 0), 1);
+      return Math.min(Math.max(-top / total, 0), 1);
     };
 
     let visible = true;
@@ -1864,6 +1896,7 @@ export default function TreeScene({
     io.observe(el);
 
     const t0 = performance.now();
+    const lastVars = new Map<string, string>();
     const heroCam = new THREE.Vector3();
     const lookAtV = new THREE.Vector3();
     const outV = new THREE.Vector3();
@@ -1876,6 +1909,7 @@ export default function TreeScene({
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       if (!visible) return;
+      frame++;
 
       // wygładzenie zamiast scruba z GSAP-a: dociąganie do celu co klatkę
       const target = scrollProgress();
@@ -2023,15 +2057,20 @@ export default function TreeScene({
         const e = t * t * (3 - 2 * t);
         const camAz = Math.atan2(camera.position.x, camera.position.z);
         const az = camAz + Math.PI + MOON_FROM + (MOON_TO - MOON_FROM) * e;
-        const y = moonBaseY + moonRise * e;
-        const vis = 1 - Math.min(Math.max((main - MOON_FADE_FROM) / MOON_FADE_SPAN, 0), 1);
+        // Wyjście z kadru: zamiast bledności – wznoszenie ponad górną krawędź.
+        const exT = Math.min(Math.max((main - MOON_FADE_FROM) / MOON_FADE_SPAN, 0), 1);
+        const ex = exT * exT * (3 - 2 * exT);
+        const y = moonBaseY + moonRise * e + moonDist * MOON_EXIT * ex;
         for (const b of moonBillboards) {
           b.position.set(Math.sin(az) * moonDist, y, Math.cos(az) * moonDist);
           b.lookAt(camera.position);
-          b.visible = vis > 0.001;
+          b.visible = ex < 1;   // poza kadrem – nie ma po co rysować
         }
-        if (moonMats.disc) moonMats.disc.opacity = vis;
-        if (moonMats.halo) moonMats.halo.uniforms.uK.value = MOON_GLOW * vis;
+        if (moonMats.disc) moonMats.disc.opacity = 1;
+        if (moonMats.halo) moonMats.halo.uniforms.uK.value = MOON_GLOW;
+        // Światło księżyca na wodzie i w chmurach nadal gaśnie: tarcza nad
+        // głową nie robi smugi w stronę horyzontu.
+        const vis = 1 - ex;
         if (waterMat) waterMat.uniforms.uMoonVis.value = vis;
         if (cloudMat) cloudMat.uniforms.uMoonVis.value = vis;
         if (waterMat) (waterMat.uniforms.uMoonDir.value as THREE.Vector2).set(Math.sin(az), Math.cos(az));
@@ -2071,8 +2110,17 @@ export default function TreeScene({
       // Widoczność tekstów: zmienne CSS na sekcji, czytane przez SceneText.
       // Jeden zapis atrybutu style na klatkę zamiast refów do każdego bloku.
       const fadeVar = (name: string, e: number, restPx: number) => {
-        sectionEl.style.setProperty(name, e.toFixed(3));
-        sectionEl.style.setProperty(`${name}-y`, reduce ? '0px' : `${((1 - e) * restPx).toFixed(1)}px`);
+        const o = e.toFixed(3);
+        const y = reduce ? '0px' : `${((1 - e) * restPx).toFixed(1)}px`;
+        if (lastVars.get(name) !== o) {
+          lastVars.set(name, o);
+          sectionEl.style.setProperty(name, o);
+        }
+        const yName = `${name}-y`;
+        if (lastVars.get(yName) !== y) {
+          lastVars.set(yName, y);
+          sectionEl.style.setProperty(yName, y);
+        }
       };
       for (let i = 0; i < CAPTIONS.length; i++) {
         const c = CAPTIONS[i];
@@ -2138,7 +2186,7 @@ export default function TreeScene({
         // 4. napis na wierzchu, bez smugi. Najpierw sami zasłaniacze do
         //    głębi (bez koloru), potem napis z testem głębi – pień go
         //    przecina tak samo, jak przecinałby w scenie.
-        if (titleMesh) {
+        if (titleMesh && titleMat && titleMat.uniforms.uOpacity.value > 0.002) {
           renderer.autoClear = false;
           renderer.clearDepth();
           camera.layers.set(LAYER_OCCLUDER);
@@ -2159,6 +2207,7 @@ export default function TreeScene({
     raf = requestAnimationFrame(loop);
 
     const onResize = () => {
+      measureSection();   // sekcja jest w vh – rośnie i maleje z oknem
       renderer.setSize(el.clientWidth, el.clientHeight);
       camera.aspect = el.clientWidth / el.clientHeight;
       camera.updateProjectionMatrix();

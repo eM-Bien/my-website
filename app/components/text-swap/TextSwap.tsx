@@ -1,7 +1,16 @@
 "use client";
 
 import { useSelectedLayoutSegment } from "next/navigation";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import s from "./TextSwap.module.scss";
 
 /**
@@ -44,7 +53,19 @@ type Held = { key: string; html: string };
  * containing block – gdyby to był zwykły div, bloki tekstu (też absolute)
  * liczyłyby pozycję względem niego, a nie względem .stage.
  */
-export default function TextSwap({ children }: { children: ReactNode }) {
+/**
+ * layout:
+ *  - "stage": warstwy absolute na cały .stage sceny (domyślnie)
+ *  - "flow":  zwykły blok w przepływie strony; warstwa wychodząca leży
+ *             absolute NAD wchodzącą, w tym samym miejscu
+ */
+export default function TextSwap({
+  children,
+  layout = "stage",
+}: {
+  children: ReactNode;
+  layout?: "stage" | "flow";
+}) {
   // NIE usePathname: ścieżka aktualizuje się render później niż dzieci, więc
   // nowy tekst renderował się od razu ostry, a potem – gdy ścieżka dogoniła –
   // był brany za "stary" i puszczany w dym. Segment [lang] pochodzi z tego
@@ -85,18 +106,30 @@ export default function TextSwap({ children }: { children: ReactNode }) {
   const inDisp = useRef<SVGFEDisplacementMapElement | null>(null);
   const inBlur = useRef<SVGFEGaussianBlurElement | null>(null);
 
+  // Siła dymu na prymitywach filtra. k: 0 = czysto, 1 = pełny dym.
+  const smoke = (which: "out" | "in", k: number) => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const disp = which === "out" ? outDisp.current : inDisp.current;
+    const blur = which === "out" ? outBlur.current : inBlur.current;
+    disp?.setAttribute("scale", String(reduce ? 0 : SMOKE.displace * k));
+    blur?.setAttribute("stdDeviation", String(reduce ? 0 : SMOKE.blur * k));
+  };
+
+  // Stan początkowy PRZED pierwszym malowaniem. Filtr wyjścia po poprzedniej
+  // podmianie zostaje na pełnym rozmyciu (tak kończy animację); gdyby zerowała
+  // go dopiero pętla rAF, pierwsza klatka pokazałaby stary tekst całkiem
+  // rozmyty, a potem nagle ostry – to było to mrugnięcie.
+  useLayoutEffect(() => {
+    if (!swap.entering) return;
+    smoke("out", 0);
+    smoke("in", 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swap.key]);
+
   useEffect(() => {
     if (!swap.entering) return;
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const set = (
-      disp: SVGFEDisplacementMapElement | null,
-      blur: SVGFEGaussianBlurElement | null,
-      k: number
-    ) => {
-      disp?.setAttribute("scale", String(reduce ? 0 : SMOKE.displace * k));
-      blur?.setAttribute("stdDeviation", String(reduce ? 0 : SMOKE.blur * k));
-    };
+    const set = (which: "out" | "in", k: number) => smoke(which, k);
 
     const t0 = performance.now();
     let raf = 0;
@@ -106,8 +139,8 @@ export default function TextSwap({ children }: { children: ReactNode }) {
       // wejście hamuje (zbiera się w ostry tekst na końcu)
       const outT = Math.min(t / OUT_MS, 1);
       const inT = Math.min(Math.max((t - OUT_MS) / IN_MS, 0), 1);   // start po wyjściu
-      set(outDisp.current, outBlur.current, outT * outT);
-      set(inDisp.current, inBlur.current, (1 - inT) * (1 - inT));
+      set("out", outT * outT);
+      set("in", (1 - inT) * (1 - inT));
       if (t < OUT_MS + IN_MS) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -123,8 +156,12 @@ export default function TextSwap({ children }: { children: ReactNode }) {
     // poprzednia jeszcze trwa (szybkie PL→EN→PL)
   }, [swap.key]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const Host = layout === "flow" ? "div" : Fragment;
+  const hostProps = layout === "flow" ? { className: s.host } : {};
+  const inLayerClass = layout === "flow" ? s.layerFlow : s.layer;
+
   return (
-    <>
+    <Host {...hostProps}>
       {/* Filtry: szum o niskiej częstotliwości = duże, miękkie kłęby.
           Region powiększony, bo przemieszczenie wypycha piksele poza
           bounding box elementu i domyślny region by je ucinał. */}
@@ -143,11 +180,20 @@ export default function TextSwap({ children }: { children: ReactNode }) {
         </defs>
       </svg>
 
+      {/* Tryb "stage": animuje się cała warstwa. Tryb "flow": warstwa tylko
+          niesie stan (data-swap) i filtr w zmiennej CSS, a co ma dymić,
+          wybiera treść klasą .swap-text (globals.scss) – obrazki i inne
+          rzeczy wspólne dla języków zostają nieruchome. */}
       {swap.prev && (
         <div
           key={swap.prev.key}
-          className={`${s.layer} ${s.out}`}
-          style={{ filter: `url(#${outId})` }}
+          className={layout === "flow" ? s.layer : `${s.layer} ${s.out}`}
+          data-swap={layout === "flow" ? "out" : undefined}
+          style={
+            layout === "flow"
+              ? ({ "--swap-filter": `url(#${outId})` } as CSSProperties)
+              : { filter: `url(#${outId})` }
+          }
           aria-hidden="true"
           // martwy HTML: ma tylko wyglądać jak stary tekst przez OUT_MS
           dangerouslySetInnerHTML={{ __html: swap.prev.html }}
@@ -159,11 +205,18 @@ export default function TextSwap({ children }: { children: ReactNode }) {
       <div
         key={swap.key}
         ref={inLayer}
-        className={`${s.layer} ${swap.entering ? s.in : ""}`}
-        style={swap.entering ? { filter: `url(#${inId})` } : undefined}
+        className={`${inLayerClass} ${swap.entering && layout !== "flow" ? s.in : ""}`}
+        data-swap={swap.entering && layout === "flow" ? "in" : undefined}
+        style={
+          !swap.entering
+            ? undefined
+            : layout === "flow"
+              ? ({ "--swap-filter": `url(#${inId})` } as CSSProperties)
+              : { filter: `url(#${inId})` }
+        }
       >
         {children}
       </div>
-    </>
+    </Host>
   );
 }
